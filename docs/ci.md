@@ -436,3 +436,45 @@ Recorded because a brief that has been departed from silently is a brief nobody 
 | `-fno-use-cxa-atexit` added | Avoids requiring `__cxa_atexit` and `__dso_handle`. See §2.5. |
 | `-ffile-prefix-map` added | Without it, the same source built in two different directories produces different bytes, and "byte-identical builds" fails for a reason unrelated to the code. |
 | `.gitattributes` added (not in the brief) | Mixed-OS team. A script checked out with CRLF fails inside the Linux container as `bad interpreter: /bin/bash^M`. |
+
+---
+
+## 7. Acceptance checklist
+
+What "done" means. Ticked only against observed evidence, never against intent.
+
+**Environment and reproducibility**
+
+- [ ] Clone the repo, run one documented command, and see the kernel boot in QEMU.
+- [ ] On a machine that has never seen this project, `git clone && bash scripts/setup.sh` ends
+      with a booting kernel and no manual steps beyond installing Docker itself.
+- [ ] The same command inside the CI container produces byte-identical build output.
+
+**Pipeline**
+
+- [ ] Opening a pull request runs format, host tests, both build profiles, smoke test and kernel
+      tests automatically.
+- [ ] A deliberately broken kernel (an infinite loop before the banner) makes CI go **red within
+      two minutes**, not hang.
+- [ ] A failing kernel test makes CI go red and the serial log is downloadable from the run.
+- [ ] `main` cannot be pushed to directly, and cannot be merged into with a red check.
+- [ ] Tagging `v0.1.0` produces a GitHub Release with the kernel binaries attached.
+
+**Documentation**
+
+- [ ] This document explains the pipeline, the flag choices and the pinned tool versions well
+      enough to be read without asking a question.
+
+**Ownership and hygiene**
+
+- [ ] `git log --diff-filter=A -- boot/ src/ include/ linker/ tests/kernel/` shows **only the
+      kernel author's commits**. Not one line of kernel code has any other authorship.
+- [ ] No `scratch/` directory survives on any merged branch.
+- [ ] No tracked text file contains CRLF.
+
+The last three are machine-checkable. `scripts/check-hygiene.sh` covers the final two on every
+pull request; the authorship one is a single command:
+
+```sh
+git log --diff-filter=A --format='%an  %h  %s' -- boot/ src/ include/ linker/ tests/kernel/
+```
