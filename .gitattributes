@@ -1,0 +1,28 @@
+# Line endings.
+#
+# WHY THIS FILE EXISTS: we develop on Windows but build inside WSL/Docker on
+# Linux. If git checks a shell script out with CRLF endings, bash fails with a
+# baffling "\r: command not found" -- and the same repo builds fine for one
+# developer and not the other. Forcing LF in the working tree makes the
+# environment-dependent failure structurally impossible.
+* text=auto eol=lf
+
+# Explicit for the file types where a stray CR is fatal rather than cosmetic:
+*.sh        text eol=lf
+*.S         text eol=lf
+*.s         text eol=lf
+*.ld        text eol=lf
+*.cpp       text eol=lf
+*.hpp       text eol=lf
+*.h         text eol=lf
+*.c         text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Makefile    text eol=lf
+Dockerfile  text eol=lf
+
+# Never munge binaries.
+*.elf   binary
+*.img   binary
+*.bin   binary
+*.png   binary

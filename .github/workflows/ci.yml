@@ -1,0 +1,327 @@
+# =============================================================================
+#  Continuous integration.
+# =============================================================================
+#
+#  Runs on every pull request and every push to main. The contract it enforces:
+#  neither developer can merge a change that breaks something the other built.
+#
+#  Design notes worth knowing before reading:
+#
+#  * Every job that touches the toolchain runs INSIDE the reference container,
+#    so a green check here means the same thing as a green build on a laptop.
+#
+#  * Jobs that need kernel sources are SKIPPED, not failed, while the kernel
+#    does not exist yet. A pipeline that is red for a reason nobody can fix
+#    trains people to ignore red, which is the one failure mode that makes all
+#    the rest of this worthless. They activate automatically the moment the
+#    relevant files appear.
+#
+#  * 'summary' is the single required status check for branch protection. It is
+#    the only name that has to stay stable; everything else can be renamed
+#    freely without touching repository settings.
+# =============================================================================
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Pushing three times in a minute should run CI once, not three times.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  #  Resolve the image, and work out how much of the pipeline is applicable.
+  # ---------------------------------------------------------------------------
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      image:      ${{ steps.img.outputs.image }}
+      has_kernel: ${{ steps.detect.outputs.has_kernel }}
+      has_ktests: ${{ steps.detect.outputs.has_ktests }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve toolchain image
+        id: img
+        run: |
+          set -euo pipefail
+          source scripts/toolchain.env
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Using image: ${IMAGE}"
+
+      # A clear message beats a confusing one. If the image has never been
+      # published, every containerised job below would fail with an opaque
+      # registry error; say so here instead.
+      - name: Verify the image exists
+        run: |
+          set -euo pipefail
+          source scripts/toolchain.env
+          if ! docker manifest inspect "${IMAGE}" >/dev/null 2>&1; then
+            echo "::error::Toolchain image ${IMAGE} could not be found."
+            echo "The 'toolchain-image' workflow publishes it, and it runs only"
+            echo "when docker/** changes. If this is the first run of the"
+            echo "project, trigger it manually: Actions -> toolchain-image ->"
+            echo "Run workflow."
+            exit 1
+          fi
+          echo "Image found."
+
+      - name: Detect what is buildable
+        id: detect
+        run: |
+          set -euo pipefail
+          HAS_KERNEL=false
+          HAS_KTESTS=false
+
+          if [ -f linker/kernel.ld ] \
+             && [ -n "$(find boot src -name '*.S' -o -name '*.cpp' 2>/dev/null | head -n1)" ]; then
+            HAS_KERNEL=true
+          fi
+          if [ -n "$(find tests/kernel -name '*.cpp' -o -name '*.S' 2>/dev/null | head -n1)" ]; then
+            HAS_KTESTS=true
+          fi
+
+          echo "has_kernel=${HAS_KERNEL}" >> "$GITHUB_OUTPUT"
+          echo "has_ktests=${HAS_KTESTS}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Pipeline scope"
+            echo ""
+            echo "| stage | applicable |"
+            echo "|---|---|"
+            echo "| build / smoke | ${HAS_KERNEL} |"
+            echo "| in-kernel tests | ${HAS_KTESTS} |"
+            if [ "${HAS_KERNEL}" = "false" ]; then
+              echo ""
+              echo "> Build stages are skipped because there is no kernel yet"
+              echo "> (needs \`linker/kernel.ld\` plus sources under \`boot/\` or \`src/\`)."
+              echo "> They activate automatically once those exist."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  #  Cross-platform hygiene. Cheapest signal, and catches the bugs that are
+  #  invisible on the machine that introduced them.
+  # ---------------------------------------------------------------------------
+  hygiene:
+    needs: setup
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.setup.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      # The checkout belongs to the runner user; the container is root. Without
+      # this, every git command fails with "detected dubious ownership".
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Line endings, filename case, exec bits
+        run: bash scripts/check-hygiene.sh
+
+  # ---------------------------------------------------------------------------
+  #  Formatting. Prevents style discussion in code review.
+  # ---------------------------------------------------------------------------
+  format:
+    needs: setup
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.setup.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: make format-check
+      - name: How to fix
+        if: failure()
+        run: |
+          echo "::error::Formatting differs from .clang-format."
+          echo "Fix locally with:  make format"
+
+  # ---------------------------------------------------------------------------
+  #  Build both profiles. Optimisation level changes which bugs are visible.
+  # ---------------------------------------------------------------------------
+  build:
+    needs: setup
+    if: needs.setup.outputs.has_kernel == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.setup.outputs.image }}
+    strategy:
+      # Do not cancel the release build because the debug build failed --
+      # knowing whether a bug is optimisation-dependent is exactly the
+      # information this matrix exists to produce.
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record the configuration
+        run: make PROFILE=${{ matrix.profile }} info
+
+      - name: Build
+        run: make PROFILE=${{ matrix.profile }}
+
+      - name: Size and sections
+        run: |
+          echo "### Size (${{ matrix.profile }})" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat build/${{ matrix.profile }}/size.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.profile }}
+          if-no-files-found: error
+          path: |
+            build/${{ matrix.profile }}/kernel.elf
+            build/${{ matrix.profile }}/kernel.img
+            build/${{ matrix.profile }}/kernel.map
+            build/${{ matrix.profile }}/size.txt
+            build/${{ matrix.profile }}/sections.txt
+
+  # ---------------------------------------------------------------------------
+  #  Boot smoke test. Catches catastrophic regressions even with zero tests.
+  # ---------------------------------------------------------------------------
+  qemu-smoke:
+    needs: [setup, build]
+    if: needs.setup.outputs.has_kernel == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.setup.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the built kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-${{ matrix.profile }}
+          path: build/${{ matrix.profile }}
+
+      - name: Boot it
+        run: |
+          bash scripts/run-tests.sh \
+            --mode smoke \
+            --kernel build/${{ matrix.profile }}/kernel.elf \
+            --timeout 60 \
+            --log build/serial-smoke-${{ matrix.profile }}.log
+
+      # The serial log is the only real evidence when a kernel misbehaves.
+      # Uploaded unconditionally -- especially on failure.
+      - name: Upload serial log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-smoke-${{ matrix.profile }}
+          if-no-files-found: warn
+          path: build/serial-smoke-${{ matrix.profile }}.log
+
+      - name: Reproduce this locally
+        if: failure()
+        run: |
+          source scripts/toolchain.env
+          echo "::error::Smoke test failed for the ${{ matrix.profile }} profile."
+          echo "Reproduce with the identical flags and container:"
+          echo "  docker run --rm -v \"\$PWD\":/work -w /work ${IMAGE} \\"
+          echo "    make PROFILE=${{ matrix.profile }} && \\"
+          echo "  docker run --rm -v \"\$PWD\":/work -w /work ${IMAGE} \\"
+          echo "    bash scripts/run-tests.sh --mode smoke --kernel build/${{ matrix.profile }}/kernel.elf"
+
+  # ---------------------------------------------------------------------------
+  #  In-kernel test suite.
+  # ---------------------------------------------------------------------------
+  qemu-tests:
+    needs: setup
+    if: needs.setup.outputs.has_ktests == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.setup.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with KERNEL_TESTS=1
+        run: make KERNEL_TESTS=1 PROFILE=debug
+
+      - name: Run the suite
+        run: |
+          bash scripts/run-tests.sh \
+            --mode ktest \
+            --kernel build/debug-ktests/kernel.elf \
+            --timeout 120 \
+            --log build/serial-ktest.log
+
+      - name: Upload serial log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-ktest
+          if-no-files-found: warn
+          path: build/serial-ktest.log
+
+      - name: Reproduce this locally
+        if: failure()
+        run: |
+          source scripts/toolchain.env
+          echo "::error::In-kernel tests failed."
+          echo "  docker run --rm -v \"\$PWD\":/work -w /work ${IMAGE} \\"
+          echo "    bash -c 'make KERNEL_TESTS=1 && bash scripts/run-tests.sh --mode ktest --kernel build/debug-ktests/kernel.elf'"
+
+  # ---------------------------------------------------------------------------
+  #  The single required check.
+  # ---------------------------------------------------------------------------
+  #  Branch protection points at this one job name. Skipped jobs are fine;
+  #  failed and cancelled ones are not. Without this aggregation, protection
+  #  rules must list every job by name and silently stop covering any job that
+  #  gets renamed -- a check that quietly stops checking.
+  summary:
+    if: always()
+    needs: [setup, hygiene, format, build, qemu-smoke, qemu-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        run: |
+          set -euo pipefail
+          declare -A R=(
+            [setup]="${{ needs.setup.result }}"
+            [hygiene]="${{ needs.hygiene.result }}"
+            [format]="${{ needs.format.result }}"
+            [build]="${{ needs.build.result }}"
+            [qemu-smoke]="${{ needs.qemu-smoke.result }}"
+            [qemu-tests]="${{ needs.qemu-tests.result }}"
+          )
+
+          {
+            echo "### CI summary"
+            echo ""
+            echo "| job | result |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          BAD=0
+          for job in setup hygiene format build qemu-smoke qemu-tests; do
+            res="${R[$job]}"
+            case "${res}" in
+              success)  icon=":white_check_mark:" ;;
+              skipped)  icon=":fast_forward:" ;;
+              *)        icon=":x:"; BAD=1 ;;
+            esac
+            echo "| ${job} | ${icon} ${res} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "${job}: ${res}"
+          done
+
+          if [ "${BAD}" -ne 0 ]; then
+            echo "::error::At least one CI job did not pass."
+            exit 1
+          fi
+          echo "All applicable jobs passed."

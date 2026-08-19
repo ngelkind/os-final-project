@@ -1,0 +1,25 @@
+# Auto-request reviewers on every pull request.
+#
+# STATUS: Yehonatan does not have a GitHub account yet. Once he does, add his
+# username to the lines below and to the repository as a collaborator with
+# write access. Until then every rule points at the sole owner, which means
+# CODEOWNERS is in place and correct rather than absent and forgotten.
+
+# Everything, by default.
+*                   @ngelkind
+
+# The kernel proper. Written by hand by its author -- see README, "Who writes
+# what". A pull request that touches these from anyone else should be a
+# conversation before it is a diff.
+/boot/              @ngelkind
+/src/               @ngelkind
+/include/           @ngelkind
+/linker/            @ngelkind
+/tests/kernel/      @ngelkind
+
+# Scaffolding: build, container, pipeline, docs.
+/Makefile           @ngelkind
+/scripts/           @ngelkind
+/docker/            @ngelkind
+/.github/           @ngelkind
+/docs/              @ngelkind

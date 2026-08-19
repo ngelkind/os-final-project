@@ -1,0 +1,53 @@
+# Code style for the kernel.
+#
+# Delivered at M1 rather than M5 on purpose: a formatter introduced *after*
+# a few thousand lines exist produces one enormous unreadable reformat commit
+# and makes `git blame` useless. Introduced before the first line is written,
+# it costs nothing.
+#
+# Nothing here is sacred. Tune it now, while the cost of changing it is zero.
+# Apply with `make format`, verify with `make format-check` (what CI runs).
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# 4 spaces. Kernel code nests (if inside loop inside function inside namespace)
+# and 2 is too little to see structure at a glance; tabs render differently in
+# every tool, which matters when two people review each other's diffs.
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# 100 rather than 80: register/bitfield manipulation and long MMIO constant
+# names blow past 80 constantly, and forced wrapping hurts readability more
+# than the extra width does.
+ColumnLimit: 100
+
+# `uint32_t* ptr` -- the pointer is part of the type, not the name.
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# Braces on the same line, but always present -- a missing brace around a
+# one-line `if` is a classic source of real kernel bugs.
+BreakBeforeBraces: Attach
+InsertBraces: true
+
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+
+# Do not reorder #includes across group boundaries. In kernel code include
+# order can be load-bearing (a header that must follow a config define), and a
+# formatter silently resorting them is a debugging nightmare.
+SortIncludes: false
+
+IndentCaseLabels: true
+NamespaceIndentation: None
+FixNamespaceComments: true
+SpaceAfterCStyleCast: true
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: Consecutive
+AlignEscapedNewlines: Left
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

@@ -1,0 +1,142 @@
+# =============================================================================
+#  Build and publish the reference toolchain container to GHCR.
+# =============================================================================
+#
+#  Runs ONLY when docker/** changes (or on demand). The image is expensive to
+#  build -- multi-arch means emulating one of the two architectures -- and it
+#  changes far less often than the kernel does. Rebuilding it on every push
+#  would add many minutes to every pull request for no benefit.
+#
+#  Publishes two tags:
+#    :latest        what developers pull, and what setup.sh uses
+#    :sha-<commit>  immutable. CI jobs pin to this one, so that rebuilding the
+#                   image can never retroactively change what an already-open
+#                   pull request builds against.
+# =============================================================================
+name: toolchain-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - '.github/workflows/toolchain-image.yml'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - '.github/workflows/toolchain-image.yml'
+  workflow_dispatch:
+
+# Building the same image twice concurrently wastes runner minutes and can
+# race on tags.
+concurrency:
+  group: toolchain-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to push to GitHub Container Registry.
+      packages: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # The image reference lives in exactly one file, the same way QEMU flags
+      # live in exactly one file. Nothing here hardcodes it.
+      - name: Resolve image reference
+        id: img
+        run: |
+          set -euo pipefail
+          source scripts/toolchain.env
+          BASE="${IMAGE_REGISTRY}/${IMAGE_OWNER}/${IMAGE_NAME}"
+          echo "base=${BASE}"                          >> "$GITHUB_OUTPUT"
+          echo "platforms=${IMAGE_PLATFORMS}"          >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${BASE}:sha-${GITHUB_SHA}"     >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${BASE}:latest"             >> "$GITHUB_OUTPUT"
+          {
+            echo "### Toolchain image"
+            echo ""
+            echo "- base: \`${BASE}\`"
+            echo "- platforms: \`${IMAGE_PLATFORMS}\`"
+            echo "- immutable tag: \`${BASE}:sha-${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # QEMU binfmt handlers, so the amd64 runner can execute arm64 binaries
+      # while building the arm64 variant of the image.
+      #
+      # Note the pleasing recursion: QEMU is used here to BUILD an image whose
+      # purpose is to run QEMU. They are unrelated instances -- this one is
+      # user-mode emulation of the build tools, the one inside the image is
+      # full-system emulation of our kernel's machine.
+      - name: Set up QEMU (for cross-architecture image build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only log in when we are actually going to push. A pull request from a
+      # fork has no write access to packages, and asking for it would fail.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On a pull request we BUILD but do not PUSH. That still catches a broken
+      # Dockerfile before it reaches main, which is the point of the check,
+      # without publishing an image from unreviewed code.
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          platforms: ${{ steps.img.outputs.platforms }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ steps.img.outputs.latest_tag }}
+            ${{ steps.img.outputs.sha_tag }}
+          # GitHub Actions cache: without it every build recompiles the whole
+          # apt layer for both architectures, which is slow and pointless.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Record what actually got baked in, so docs/ci.md section 4 can be
+      # updated from evidence rather than from memory.
+      - name: Report toolchain versions
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.img.outputs.sha_tag }}"
+          echo "Pulling ${IMAGE} (native arch only) to read its version manifest"
+          docker pull "${IMAGE}"
+          {
+            echo "### Toolchain versions in this image"
+            echo ""
+            echo '```'
+            docker run --rm "${IMAGE}" cat /etc/toolchain-versions.txt
+            echo '```'
+            echo ""
+            echo "Copy these into \`docs/ci.md\` section 4."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: How to pin CI to this image
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Pinning"
+            echo ""
+            echo "To make CI build against this exact image, set in \`scripts/toolchain.env\`:"
+            echo ""
+            echo '```sh'
+            echo 'IMAGE_TAG="${IMAGE_TAG:-sha-'"${GITHUB_SHA}"'}"'
+            echo '```'
+            echo ""
+            echo "That keeps the pin a reviewable one-line diff rather than"
+            echo "an invisible dependency on whatever \`latest\` happens to be."
+          } >> "$GITHUB_STEP_SUMMARY"
