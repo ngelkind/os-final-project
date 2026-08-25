@@ -57,8 +57,9 @@ jobs:
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "Using image: ${IMAGE}"
 
-      # docker manifest inspect below talks to GHCR directly, not through a
-      # container job, so it needs its own login for a private package.
+      # docker manifest inspect below talks to GHCR directly rather than
+      # through a container job, so it needs a login of its own for the same
+      # reason.
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -125,9 +126,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
-      # The package is private (it inherits the repository's visibility), so
-      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
-      # the packages:read permission granted at the top of this file.
+      # Authenticate before pulling. The package is public today, so this is
+      # not strictly required -- but a package inherits the repository's
+      # visibility when first published, and anyone flipping it back to
+      # private would otherwise break every job here at image pull, before
+      # any of our own code runs. GITHUB_TOKEN already carries the
+      # packages:read permission granted at the top of this file.
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -148,9 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
-      # The package is private (it inherits the repository's visibility), so
-      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
-      # the packages:read permission granted at the top of this file.
+      # Authenticate before pulling. The package is public today, so this is
+      # not strictly required -- but a package inherits the repository's
+      # visibility when first published, and anyone flipping it back to
+      # private would otherwise break every job here at image pull, before
+      # any of our own code runs. GITHUB_TOKEN already carries the
+      # packages:read permission granted at the top of this file.
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -173,9 +180,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
-      # The package is private (it inherits the repository's visibility), so
-      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
-      # the packages:read permission granted at the top of this file.
+      # Authenticate before pulling. The package is public today, so this is
+      # not strictly required -- but a package inherits the repository's
+      # visibility when first published, and anyone flipping it back to
+      # private would otherwise break every job here at image pull, before
+      # any of our own code runs. GITHUB_TOKEN already carries the
+      # packages:read permission granted at the top of this file.
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -223,9 +233,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
-      # The package is private (it inherits the repository's visibility), so
-      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
-      # the packages:read permission granted at the top of this file.
+      # Authenticate before pulling. The package is public today, so this is
+      # not strictly required -- but a package inherits the repository's
+      # visibility when first published, and anyone flipping it back to
+      # private would otherwise break every job here at image pull, before
+      # any of our own code runs. GITHUB_TOKEN already carries the
+      # packages:read permission granted at the top of this file.
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -280,9 +293,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
-      # The package is private (it inherits the repository's visibility), so
-      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
-      # the packages:read permission granted at the top of this file.
+      # Authenticate before pulling. The package is public today, so this is
+      # not strictly required -- but a package inherits the repository's
+      # visibility when first published, and anyone flipping it back to
+      # private would otherwise break every job here at image pull, before
+      # any of our own code runs. GITHUB_TOKEN already carries the
+      # packages:read permission granted at the top of this file.
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
