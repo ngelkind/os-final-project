@@ -9,6 +9,52 @@ labelled. Nothing below is presented as smoother than it is.
 
 ---
 
+## 0. What is actually set up on this Mac (verified 2026-08-25)
+
+Everything below this section was written before any of it had been run here. This section is the
+opposite: only things that were executed and observed on this machine. Where it contradicts a
+later section, this one is right and the later one has been corrected in place.
+
+**Toolchains present.**
+
+| Piece | What is used | Verified |
+|---|---|---|
+| Build | container `ghcr.io/ngelkind/os-final-project-ci:latest`, pulled `linux/arm64` | `make info` resolves; g++ 13.3.0, QEMU 8.2.2, bear 3.1.3 inside |
+| Docker runtime | **colima**, not Docker Desktop — needs no admin rights | `docker info` -> 29.5.2, `linux/aarch64` |
+| Run / debug | **native** Homebrew `qemu-system-aarch64` 11.1.0 | boots and accepts a gdb connection |
+| Debugger | **native** Homebrew `aarch64-elf-gdb` 17.2 | attached to QEMU, read `pc`/`cpsr`, disassembled |
+
+**The run and debug path does not cross the container boundary.** `scripts/run.sh` and
+`scripts/debug.sh` invoke QEMU directly and never call `make`, so they run natively on macOS
+against the ELF the container produced in the bind-mounted `build/`. That removes the port
+publishing and the `/work` path mapping that section 5 warns about. Only the *build* is
+containerised.
+
+Proof the debug path works, run with no kernel at all — QEMU halts before the first instruction,
+so a debugger can attach to a bare machine:
+
+```sh
+qemu-system-aarch64 -machine virt,gic-version=2 -cpu cortex-a53 -m 512M -accel tcg -display none -s -S &
+aarch64-elf-gdb -batch -ex 'set architecture aarch64' -ex 'target remote localhost:1234' \
+                -ex 'info registers pc cpsr'
+```
+
+Observed: `pc 0x0`, `cpsr 0x400003c5 [ SP EL=1 F I A D ]` — the correct AArch64 reset state for
+`-machine virt`. If that works and CLion's debugger does not, the problem is CLion's
+configuration, not the toolchain.
+
+**Run configurations** are in `.idea/runConfigurations/` (git-ignored, so they are yours alone):
+`build debug (container)`, `build release (container)`, `compdb (container)`, `run QEMU (native)`,
+`debug QEMU halted (native)`, `attach to QEMU`. The two QEMU ones have *Execute in terminal*
+ticked, for the Ctrl-A X reason in section 4.
+
+**A macOS trap worth knowing.** A GUI-launched CLion does not inherit your shell `PATH`, so
+`/opt/homebrew/bin` is invisible to it and `docker`, `qemu-system-aarch64` and the cross GDB all
+appear missing. Every run configuration therefore sets `PATH` and `DOCKER_HOST` explicitly rather
+than assuming them.
+
+---
+
 ## 1. The build-system question, answered first
 
 CLion is built around CMake. Our build is a plain Makefile, chosen because a mentor should be able
@@ -85,11 +131,17 @@ thousands — this should be fine. If it turns out sluggish, fall back to:
 brew install --cask gcc-aarch64-embedded
 ```
 
-Point CLion's toolchain at that compiler and keep building through `make` in a terminal. The
-indexer then uses `aarch64-none-elf-gcc`, whose headers and built-in macros are close enough to
-`aarch64-linux-gnu-gcc` for completion and navigation to be correct. **They are not identical**,
-so treat CLion's opinion about what compiles as advisory. The build in the container remains the
-authority.
+**This does not work for this project, and the reason is worth writing down.** Homebrew's
+`aarch64-elf-gcc` (16.2.0, already installed here) is built `--without-headers`: it ships GCC's own
+freestanding C headers and nothing else. `#include <stdint.h>` compiles; `#include <cstdint>` fails
+with *"cstdint: No such file or directory"*, and so do `<cstddef>` and `<type_traits>`. We build
+C++20, and section 3 tells you that unresolved freestanding C++ headers mean the wrong compiler --
+so a native cross compiler as the indexer's compiler would produce exactly the symptom it is meant
+to cure.
+
+The container's `aarch64-linux-gnu-g++` carries a full libstdc++, so it has those headers. That
+makes the Docker toolchain **required** here rather than merely recommended. The native cross
+compiler is still useful -- but for `aarch64-elf-gdb`, not for indexing.
 
 ---
 
@@ -173,8 +225,11 @@ Options, best first:
    pretty, zero configuration risk, and it always works. If §5 fights you for more than half an
    hour, this is the pragmatic answer — you lose the GUI, not the debugging.
 
-I have not run options 1 or 2 on your machine, so treat the specifics below as a starting
-configuration rather than a verified recipe.
+Option 1 is now installed and verified on this Mac (section 0): `aarch64-elf-gdb` 17.2 attached to
+a running QEMU gdbstub and read registers correctly. What is *not* verified is CLion driving it
+through the GDB Remote Debug dialog, because that cannot be checked from a terminal. If the GUI
+misbehaves, section 0's two-command reproduction tells you immediately whether the fault is CLion
+or the toolchain.
 
 ### The configuration
 
