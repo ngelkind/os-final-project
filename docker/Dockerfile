@@ -64,6 +64,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       # CLion's indexer sees the exact flags the compiler saw rather than
       # guessing them. See docs/clion.md.
       bear \
+      # Not used by our build -- we use Make, and ADR 0002 explains why.
+      # It is here because CLion's Docker toolchain DETECTS the compilers by
+      # configuring a throwaway CMake project inside the container. With no
+      # cmake, that probe fails and CLion reports "C Compiler: not found" even
+      # though the cross compiler is sitting right there, which makes the
+      # toolchain unusable for indexing. Cheap package, removes a dead end.
+      cmake \
       python3 \
       git \
       ca-certificates \
