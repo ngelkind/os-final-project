@@ -57,6 +57,15 @@ jobs:
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "Using image: ${IMAGE}"
 
+      # docker manifest inspect below talks to GHCR directly, not through a
+      # container job, so it needs its own login for a private package.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # A clear message beats a confusing one. If the image has never been
       # published, every containerised job below would fail with an opaque
       # registry error; say so here instead.
@@ -116,6 +125,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
+      # The package is private (it inherits the repository's visibility), so
+      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
+      # the packages:read permission granted at the top of this file.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       # The checkout belongs to the runner user; the container is root. Without
@@ -133,6 +148,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
+      # The package is private (it inherits the repository's visibility), so
+      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
+      # the packages:read permission granted at the top of this file.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: clang-format
@@ -152,6 +173,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
+      # The package is private (it inherits the repository's visibility), so
+      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
+      # the packages:read permission granted at the top of this file.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       # Do not cancel the release build because the debug build failed --
       # knowing whether a bug is optimisation-dependent is exactly the
@@ -196,6 +223,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
+      # The package is private (it inherits the repository's visibility), so
+      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
+      # the packages:read permission granted at the top of this file.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -247,6 +280,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.setup.outputs.image }}
+      # The package is private (it inherits the repository's visibility), so
+      # the runner must authenticate before it can pull. GITHUB_TOKEN carries
+      # the packages:read permission granted at the top of this file.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
