@@ -7,16 +7,24 @@ have never built an operating system before, and it assumes nothing is installed
 
 1. Git
 2. Docker
-3. An editor
+3. QEMU and a cross debugger — one command, two packages
+4. An editor
 
-That is it. No cross-compiler, no QEMU, no build tools. Those live inside a container image that
-is pulled for you, which is what makes it possible for two people on different operating systems
-to get identical results.
+**No cross-compiler and no build tools.** Those live inside a container image that is pulled for
+you, which is what makes it possible for two people on different operating systems to get
+identical results.
+
+QEMU is the one exception, and the reason is worth knowing because it explains the whole layout:
+**the build is containerised, the run is not.** `make run` and `make debug` call
+`scripts/run.sh` and `scripts/debug.sh`, which exec QEMU directly on your machine and never enter
+the container. That keeps the interactive serial console and the debugger port clear of container
+plumbing, at the price of two packages you install yourself. `scripts/setup.sh` checks for both
+and prints the exact install command if they are missing — it will not install them for you.
 
 **The one-command version, once Docker is running:**
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/ngelkind/os-final-project.git
 cd os-final-project
 bash scripts/setup.sh
 ```
@@ -146,7 +154,7 @@ The alternative is **Docker Desktop for Windows** with the WSL2 backend enabled.
 
 ```sh
 mkdir -p ~/projects && cd ~/projects
-git clone <repo-url>
+git clone https://github.com/ngelkind/os-final-project.git
 cd os-final-project
 bash scripts/setup.sh
 ```
@@ -162,6 +170,31 @@ drive and every file access crosses the WSL filesystem bridge. Consequences:
 
 To reach your files from Windows tools, use the `\\wsl$` path (it appears in Explorer as a network
 location) or your editor's WSL remote mode. Do not "fix" the slowness by moving the repo back.
+
+### 4. QEMU and the debugger
+
+Inside WSL, not on Windows — the kernel runs in Linux alongside everything else:
+
+```sh
+sudo apt-get install -y qemu-system-arm gdb-multiarch
+```
+
+Two names that look wrong and are not:
+
+- **`qemu-system-arm`** is the package that contains `qemu-system-aarch64`. Ubuntu puts the 64-bit
+  emulator in a package whose name says 32-bit. Installing `qemu-system` pulls in every
+  architecture and several hundred megabytes you will never use.
+- **`gdb-multiarch`** rather than `gdb`. The plain `gdb` is built for your host architecture and
+  simply cannot debug an `aarch64` target — it is not a matter of flags. On the Mac side of this
+  project the equivalent package is `aarch64-elf-gdb`; both are correct, and `scripts/debug.sh`
+  detects whichever you have and prints the right command for it.
+
+Check:
+
+```sh
+qemu-system-aarch64 --version
+gdb-multiarch --version
+```
 
 ---
 
@@ -186,7 +219,7 @@ architecture it actually pulled and warns if it is the wrong one.
 Then:
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/ngelkind/os-final-project.git
 cd os-final-project
 bash scripts/setup.sh
 ```
@@ -196,16 +229,32 @@ bash scripts/setup.sh
 Identical, with the Intel build of Docker Desktop. You will pull the `linux/amd64` image, which is
 the same one CI uses.
 
-### If you want a native toolchain too (optional, for speed)
+### QEMU and the debugger (required, not optional)
 
 ```sh
-brew install qemu
-brew install --cask gcc-aarch64-embedded   # or another aarch64 cross toolchain
+brew install qemu aarch64-elf-gdb
 ```
 
-Note the caveat above: native is for speed, the container is for truth. Also note the native
-compiler will be a different build from the container's, so `-Werror` may fire on something CI
-does not see (or miss something CI catches). That is expected.
+Verified on the Apple Silicon machine this project is developed on: `qemu-system-aarch64` 11.1.0
+and `aarch64-elf-gdb` 17.2, with the debugger attaching to QEMU's stub and reading registers
+correctly. See `docs/clion.md` section 0.
+
+### A native cross-compiler (genuinely optional, and read this first)
+
+You may also install a native cross-compiler so builds skip the container layer:
+
+```sh
+brew install --cask gcc-aarch64-embedded
+```
+
+But `docs/clion.md` section 2 documents why this one **cannot** serve as CLion's indexing
+compiler: Homebrew's `aarch64-elf-gcc` is built `--without-headers`, so `#include <cstdint>` fails
+where the container's `aarch64-linux-gnu-g++` succeeds. Useful for a fast command-line build;
+not a substitute for the container.
+
+Native is for speed, the container is for truth. A native compiler is also a *different build*
+from the container's, so `-Werror` may fire on something CI does not see, or miss something CI
+catches. That is expected, and the container is the tiebreaker.
 
 ---
 
@@ -213,15 +262,19 @@ does not see (or miss something CI catches). That is expected.
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y git docker.io
+sudo apt-get install -y git docker.io qemu-system-arm gdb-multiarch
 sudo usermod -aG docker $USER
 sudo systemctl enable --now docker
 ```
 
+(`qemu-system-arm` is the package that ships `qemu-system-aarch64`; `gdb-multiarch` is the
+debugger that understands a non-host architecture. See the Windows section above for why both
+names look wrong.)
+
 Log out and back in for the group change, then:
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/ngelkind/os-final-project.git
 cd os-final-project
 bash scripts/setup.sh
 ```
@@ -330,7 +383,8 @@ both of which are worth understanding. Do not wave it away as "works on mine".
 
 ## Everyday commands
 
-All of these work identically on every platform.
+All of these work identically on every platform. `run` and `debug` need the native QEMU from your
+platform's section above; the rest go through the container and need only Docker.
 
 ```sh
 make                    # build the debug profile

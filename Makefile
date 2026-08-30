@@ -312,7 +312,8 @@ LDLIBS := -lgcc
 #  7. Build rules
 # -----------------------------------------------------------------------------
 .PHONY: all
-all: $(KERNEL_ELF) $(KERNEL_IMG) $(BUILD_DIR)/size.txt $(BUILD_DIR)/sections.txt
+all: $(KERNEL_ELF) $(KERNEL_IMG) $(BUILD_DIR)/size.txt $(BUILD_DIR)/sections.txt \
+     compdb-update
 
 $(KERNEL_ELF): $(OBJS) $(LDSCRIPT) | check-sources check-toolchain
 	@mkdir -p $(@D)
@@ -411,6 +412,17 @@ run: $(KERNEL_ELF)
 debug: $(KERNEL_ELF)
 	@KERNEL=$(KERNEL_ELF) ./scripts/debug.sh
 
+# Closing a CLion terminal tab does not kill the QEMU running in it -- the
+# process is reparented to launchd and, because this kernel never halts, keeps
+# a host core pinned at 100% forever. Recover with this.
+.PHONY: kill-qemu
+kill-qemu:
+	@./scripts/kill-qemu.sh
+
+.PHONY: list-qemu
+list-qemu:
+	@./scripts/kill-qemu.sh --list
+
 # -----------------------------------------------------------------------------
 #  10. Tests  (wired up in M3/M4 -- see docs/ci.md)
 # -----------------------------------------------------------------------------
@@ -466,18 +478,110 @@ format-check:
 # which is what lets an IDE index freestanding cross-compiled code correctly
 # instead of falling back on the host compiler's headers. See docs/clion.md.
 #
-# Generated from a real build rather than inferred, so it cannot disagree with
-# what actually happened. Not committed: it contains absolute paths that differ
-# per machine.
+# It is generated as a BYPRODUCT OF THE BUILD, not by a separate command you
+# have to remember. Each compile rule writes a one-entry fragment next to its
+# object file, and the stitch rule below concatenates the fragments belonging
+# to the current source list. That has three properties worth the machinery:
+#
+#   * Automatic. Adding a source file or changing a flag updates the database
+#     on the next build, from any entry point. A stale index was the single
+#     most common cause of "this file does not belong to any project target".
+#   * Incremental. The earlier `bear`-based version had to `make clean` first,
+#     because bear can only record compilers it actually watched run, and an
+#     up-to-date object runs nothing. Fragments persist, so no forced rebuild.
+#   * Honest. The fragment is written by the same recipe that runs the
+#     compiler, from the same variables. It cannot drift from the real build,
+#     which is the only property that made bear worth using in the first place.
+#
+# Deleting a source file is handled too: the stitch iterates $(OBJS), so an
+# orphaned fragment for a file that no longer exists is simply not included.
+#
+# Not committed: it contains absolute paths that differ per machine.
+
+COMPDB_JSON  := compile_commands.json
+COMPDB_FRAGS := $(OBJS:.o=.o.json)
+
+# 1 => maintain compile_commands.json during the build. Set COMPDB=0 for a
+# build that must not touch the working tree (CI does not need an IDE index).
+COMPDB ?= 1
+
+# The paths recorded here are $(CURDIR)-relative, and the IDE reads the file
+# from OUTSIDE the container that wrote it. So $(CURDIR) has to be a path that
+# also exists on the host. scripts/compdb.sh guarantees this by bind-mounting
+# the repo at its own host path, and CLion's Docker toolchain does the same by
+# default. A build under the /work convention printed by scripts/setup.sh would
+# instead record /work/src/... -- paths that resolve to nothing on the host,
+# producing exactly the "does not belong to any project target" failure this
+# is meant to prevent. Rather than silently overwriting a good database with a
+# useless one, such a build skips the index and says so.
+COMPDB_PORTABLE := $(if $(filter /work,$(CURDIR)),,1)
+
+# $(call compdb-fragment,object,source,full command line)
+#
+# Written with printf and sed rather than a JSON library because this runs
+# inside the toolchain container, and the container is not required to have
+# python. Backslashes and quotes are escaped; a flag containing a literal
+# space would still be split, which no flag in this Makefile does.
+#
+# The compiler (first word) is resolved to an absolute path. The IDE EXECUTES
+# it to learn its builtin macros and system header search path, and it does
+# not necessarily do so with the same PATH the build had; a bare
+# aarch64-linux-gnu-g++ is a "Cannot find compiler executable" waiting to
+# happen. See docs/clion.md section 1.
+ifeq ($(COMPDB)$(COMPDB_PORTABLE),11)
+define compdb-fragment
+@{ printf '{"directory":"%s","file":"%s","output":"%s","arguments":[' \
+        '$(CURDIR)' '$(CURDIR)/$(2)' '$(CURDIR)/$(1)'; \
+   sep=''; \
+   for a in $(3); do \
+       if [ -z "$$sep" ]; then a="$$(command -v "$$a" || printf '%s' "$$a")"; fi; \
+       printf '%s"%s"' "$$sep" \
+           "$$(printf '%s' "$$a" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; \
+       sep=','; \
+   done; \
+   printf ']}'; } > $(1).json
+endef
+else
+compdb-fragment =
+endif
+
+# The fragment is a real target derived from the source, NOT a side effect of
+# compiling. That distinction matters twice: a fragment missing for an
+# already-up-to-date object is regenerated without forcing a recompile, and a
+# file that does not compile yet still gets indexed -- which is exactly when
+# an IDE index is most valuable. The Makefile is a prerequisite because it is
+# where the flags live, so changing a flag refreshes every entry.
+$(OBJ_DIR)/%.cpp.o.json: %.cpp Makefile
+	@mkdir -p $(@D)
+	$(call compdb-fragment,$(OBJ_DIR)/$*.cpp.o,$<,$(CXX) $(CXXFLAGS) -c $< -o $(OBJ_DIR)/$*.cpp.o)
+
+$(OBJ_DIR)/%.S.o.json: %.S Makefile
+	@mkdir -p $(@D)
+	$(call compdb-fragment,$(OBJ_DIR)/$*.S.o,$<,$(AS) $(ASFLAGS) -c $< -o $(OBJ_DIR)/$*.S.o)
+
+.PHONY: compdb-update
+compdb-update: $(COMPDB_FRAGS)
+ifeq ($(COMPDB)$(COMPDB_PORTABLE),11)
+	@{ printf '[\n'; first=1; \
+	   for f in $(COMPDB_FRAGS); do \
+	       [ -f "$$f" ] || continue; \
+	       [ "$$first" = 1 ] || printf ',\n'; first=0; \
+	       printf '  '; cat "$$f"; \
+	   done; \
+	   printf '\n]\n'; } > $(COMPDB_JSON)
+else ifneq ($(COMPDB),1)
+	@:
+else
+	@echo "  note    compile_commands.json not updated: \$$(CURDIR) is $(CURDIR),"
+	@echo "          which does not exist on the host running the IDE."
+	@echo "          Use scripts/compdb.sh, which mounts the repo at its host path."
+endif
+
+# Kept as a named entry point because docs and muscle memory refer to it, and
+# because scripts/compdb.sh drives the build through it. It is now just a
+# build: the database falls out of `all`.
 .PHONY: compdb
-compdb:
-	@command -v bear >/dev/null 2>&1 || { \
-	   echo "error: 'bear' not found."; \
-	   echo "       It is in the toolchain container. Run this there:"; \
-	   echo "         docker run --rm -v \"\$$PWD\":/work -w /work <image> make compdb"; \
-	   exit 1; }
-	$(MAKE) clean
-	bear -- $(MAKE) PROFILE=debug
+compdb: all
 	@echo "wrote compile_commands.json"
 
 # -----------------------------------------------------------------------------
@@ -512,6 +616,8 @@ help:
 	@echo "  all           build kernel.elf + kernel.img   (default)"
 	@echo "  run           boot the kernel in QEMU"
 	@echo "  debug         boot halted, waiting for gdb on :1234"
+	@echo "  list-qemu     show stray QEMU instances left by closed terminals"
+	@echo "  kill-qemu     kill them"
 	@echo "  test          host unit tests + in-kernel tests under QEMU"
 	@echo "  test-host     host unit tests only"
 	@echo "  test-qemu     in-kernel tests under QEMU only"

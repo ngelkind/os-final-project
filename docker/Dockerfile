@@ -43,9 +43,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 #  Architecture-independent packages
 # -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      # --- build ---
+      # --- build --- \
       make \
-      # Host C++ compiler, for the Layer-1 host unit tests that run natively
+      # Host C++ compiler, for the Layer-1 host unit tests that run natively \
       # without QEMU. Also pulls in a working native binutils.
       g++ \
       # --- emulation ---

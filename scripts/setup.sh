@@ -384,7 +384,65 @@ if [[ "${PLATFORM}" == "macos" && "${HOST_ARCH}" == "arm64" && "${IMAGE_ARCH}" =
 fi
 
 # =============================================================================
-#  6. Directories git cannot carry
+#  6. Native run and debug tools
+# =============================================================================
+# The BUILD is containerised. The RUN and DEBUG are NOT: `make run` and
+# `make debug` call scripts/run.sh and scripts/debug.sh, which exec QEMU
+# directly on this host and never go through the container. So a machine can
+# finish this script with a perfect container and still fail at `make run`
+# with "qemu-system-aarch64 not found on PATH" -- exactly the kind of late,
+# confusing failure the rest of this script exists to prevent.
+#
+# Checked and reported, never installed -- same rule as Docker above. Missing
+# tools are a warning rather than a stop: the build still works, and the
+# container can run QEMU too (with more ceremony, noted below).
+step "Checking native run/debug tools"
+
+NATIVE_MISSING=0
+
+if command -v qemu-system-aarch64 >/dev/null 2>&1; then
+    ok "qemu-system-aarch64: $(qemu-system-aarch64 --version | head -n 1)"
+else
+    NATIVE_MISSING=1
+    warn "qemu-system-aarch64 is not on your PATH."
+    info "'make run' and 'make debug' will stop with exit 127 until it is."
+    case "${PLATFORM}" in
+        macos)     info "Install:  brew install qemu" ;;
+        wsl|linux) info "Install:  sudo apt-get install -y qemu-system-arm"
+                   info "(Ubuntu ships qemu-system-aarch64 inside qemu-system-arm --"
+                   info " the package name does not mention 64 anywhere.)" ;;
+    esac
+fi
+
+# The cross debugger has a different name on each platform and both are
+# correct. Ubuntu/WSL: gdb-multiarch. macOS/Homebrew: aarch64-elf-gdb.
+GDB_FOUND=""
+for g in gdb-multiarch aarch64-elf-gdb aarch64-none-elf-gdb; do
+    if command -v "${g}" >/dev/null 2>&1; then GDB_FOUND="${g}"; break; fi
+done
+if [[ -n "${GDB_FOUND}" ]]; then
+    ok "cross debugger: ${GDB_FOUND}"
+else
+    NATIVE_MISSING=1
+    warn "no AArch64-capable debugger found."
+    info "Your system gdb (if any) is built for THIS machine's architecture and"
+    info "cannot debug an aarch64 target. You need a cross build."
+    case "${PLATFORM}" in
+        macos)     info "Install:  brew install aarch64-elf-gdb" ;;
+        wsl|linux) info "Install:  sudo apt-get install -y gdb-multiarch" ;;
+    esac
+fi
+
+if [[ "${NATIVE_MISSING}" -eq 1 ]]; then
+    info ""
+    info "Not fatal -- you can build right now. The alternative to installing"
+    info "these is running QEMU inside the container, which needs 'docker run"
+    info "-it' for the interactive serial console and '-p 127.0.0.1:1234:1234'"
+    info "for the debugger. Native is simpler; see docs/onboarding.md."
+fi
+
+# =============================================================================
+#  7. Directories git cannot carry
 # =============================================================================
 # git does not track empty directories, and these deliberately contain no
 # placeholder file -- a .gitkeep under boot/ would put the scaffolding's
@@ -401,7 +459,7 @@ for d in boot src include linker tests/kernel tests/host; do
 done
 
 # =============================================================================
-#  7. Build and smoke test
+#  8. Build and smoke test
 # =============================================================================
 DOCKER_RUN=( docker run --rm -v "${REPO_ROOT}:/work" -w /work )
 
@@ -437,6 +495,13 @@ if [[ -z "${KERNEL_SOURCES}" || "${HAVE_LINKER_SCRIPT}" -eq 0 ]]; then
     echo "to boot yet -- write boot/ and linker/kernel.ld against the contract"
     echo "in docs/ci.md section 2, then re-run this script."
     echo
+    if [[ "${NATIVE_MISSING}" -eq 1 ]]; then
+        echo "One gap to close before you can boot anything: the native QEMU and"
+        echo "debugger reported above are missing, so 'make run' and 'make debug'"
+        echo "will not work yet. The install commands are printed above."
+        echo
+    fi
+
     echo "Verify the toolchain itself right now if you like:"
     echo "    docker run --rm ${IMAGE} aarch64-linux-gnu-g++ --version"
     echo "    docker run --rm ${IMAGE} qemu-system-aarch64 --version"
@@ -464,7 +529,7 @@ step "Smoke test (booting the kernel under QEMU)"
            "your environment is working correctly."
 
 # =============================================================================
-#  8. Done
+#  9. Done
 # =============================================================================
 echo
 echo "${G}${B}=============================================================${N}"
@@ -473,6 +538,12 @@ echo "${G}${B}=============================================================${N}"
 echo
 echo "The kernel built in the reference container and booted under QEMU."
 echo
+if [[ "${NATIVE_MISSING}" -eq 1 ]]; then
+    echo "Note: the native QEMU/debugger reported above are missing, so the"
+    echo "'make run' and 'make debug' lines below will not work yet."
+    echo
+fi
+
 echo "Next:"
 echo "    make run                 boot it interactively (Ctrl-A X to quit)"
 echo "    make debug               boot halted, waiting for gdb on :1234"

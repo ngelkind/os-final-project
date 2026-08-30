@@ -19,7 +19,7 @@ later section, this one is right and the later one has been corrected in place.
 
 | Piece | What is used | Verified |
 |---|---|---|
-| Build | container `ghcr.io/ngelkind/os-final-project-ci:latest`, pulled `linux/arm64` | `make info` resolves; g++ 13.3.0, QEMU 8.2.2, bear 3.1.3 inside |
+| Build | container `ghcr.io/ngelkind/os-final-project-ci:latest`, pulled `linux/arm64` | `make info` resolves; g++ 13.3.0, QEMU 8.2.2 inside |
 | Docker runtime | **colima**, not Docker Desktop — needs no admin rights | `docker info` -> 29.5.2, `linux/aarch64` |
 | Run / debug | **native** Homebrew `qemu-system-aarch64` 11.1.0 | boots and accepts a gdb connection |
 | Debugger | **native** Homebrew `aarch64-elf-gdb` 17.2 | attached to QEMU, read `pc`/`cpsr`, disassembled |
@@ -75,19 +75,103 @@ so the indexer sees exactly the flags the compiler saw.
 I am **not** switching the build system — the brief says to ask first, and I would argue against
 it anyway. If you want C after reading this, say so and I will lay out what it actually costs.
 
-Generate the database (target added for this; runs `bear` inside the container):
+Generate the database:
 
 ```sh
-make compdb
+./scripts/compdb.sh
 ```
 
-That writes `compile_commands.json` in the repo root. Re-run it when you add source files or
-change flags. It is in `.gitignore` — it is generated output, and it contains absolute paths that
-differ per machine.
+The output is in `.gitignore` — it is generated, and it contains absolute paths that differ per
+machine.
+
+### You do not normally re-run it (changed 2026-08-30)
+
+The Makefile maintains `compile_commands.json` as a **byproduct of every build**. Each source has a
+one-entry JSON fragment under `build/<profile>/obj/`, derived from the source file and the flags in
+the Makefile, and the build stitches the fragments belonging to the current source list into the
+database. Add a file, change a flag, build — the index is current.
+
+Three consequences worth knowing:
+
+* **It is derived from the source, not from a compiler that ran.** So a file that does not compile
+  yet is still indexed, and a database deleted by hand comes back on the next build without
+  forcing a recompile.
+* **The Makefile is a prerequisite of every fragment.** Changing a flag rewrites every entry.
+* **CLion still has to reload.** It watches the file and usually offers; accept it, or
+  **File → Reload Project**. Nothing in a Makefile can reach into the IDE.
+
+`COMPDB=0` turns the whole thing off for a build that must not touch the working tree.
+
+Run `scripts/compdb.sh` when the IDE is not what is driving the build, when switching `INDEXER`
+modes, or to rebuild the extracted header cache.
+
+### Why a script at all (verified 2026-08-29)
+
+The database is written *inside* the container and read *outside* it. Two things break across that
+boundary.
+
+**Paths — always broken, always fixed by the script.** Entries hold absolute paths. Mounted at
+`/work`, every entry would say `/work/src/kernel_main.cpp`, which does not exist on the host. CLion
+matches nothing and reports *"this file does not belong to any project target"* with no completion
+at all. CLion's own log is unambiguous about it:
+
+```
+RadProjectModelHost - Sending updates, project model has 0 sources, 0 weak sources
+                      and 1 unknown sources
+```
+
+The fix is a mount trick: bind the repo into the container at the **same absolute path** it has on
+the host, so what gets recorded is already host-valid. A build under a `/work`-style mount does not
+write the database at all — it prints a note instead, rather than silently replacing a good
+database with a useless one. It also makes
+`-ffile-prefix-map=$(CURDIR)=.` strip the same prefix a host build would, which keeps the debug
+info consistent between the two.
+
+**The compiler — depends on your toolchain.** Entries name `/usr/bin/aarch64-linux-gnu-g++`. The
+IDE does not merely read the flags, it *executes* the compiler to learn its builtin macros and its
+system header search path (§2). *Where* it looks for that binary depends on which toolchain the IDE
+is set to, so the script has two modes:
+
+| Mode | For | What it does |
+|---|---|---|
+| `INDEXER=container` **(default)** | an IDE using the **Docker toolchain** | Nothing. The database stays exactly as the build wrote it, and the IDE runs the real build compiler in the container. The indexer and the build are then literally the same compiler. |
+| `INDEXER=host` | an IDE with **no Docker toolchain** | Extracts the container toolchain's header tree to `~/.cache/os-final-project/toolchain-headers` (26MB, outside the repo so CLion does not index it as ours) and rewrites each entry to a host AArch64 driver plus `-isystem` flags pointing there. Only the driver and header search path change; every build flag is preserved verbatim. |
+
+Getting this wrong produces a very specific error, worth recognising:
+
+```
+Cannot find compiler executable: '/opt/homebrew/bin/aarch64-elf-g++'
+```
+
+That is `INDEXER=host` output being read by a Docker toolchain — CLion is looking for a Homebrew
+path *inside the container*. The reverse mismatch fails the same way with `/usr/bin/aarch64-linux-gnu-g++`.
+
+In `host` mode the database is no longer a byte-exact transcript of the build, so the untouched
+output is kept beside it as `compile_commands.raw.json`. In `container` mode there is
+nothing to keep, because nothing is modified.
+
+**A failing build still produces an index.** The script passes `-k` and does not abort on a
+non-zero exit, because the index is most valuable exactly when the code does not compile yet.
+Entries are derived from the sources rather than from compilers that were watched running, so a
+file that fails to compile is still indexed; `-k` keeps the rest of the build going so the objects,
+and everything downstream, are as complete as they can be.
 
 ---
 
 ## 2. Toolchain: Docker or local?
+
+> **Confirmed 2026-08-29.** This section's recommendation held up and is now what is configured
+> here: CLion's default toolchain is `Docker`, image `ghcr.io/ngelkind/os-final-project-ci:latest`,
+> `--platform linux/arm64`, C++ compiler pinned to `/usr/bin/aarch64-linux-gnu-g++`. It is why
+> `scripts/compdb.sh` defaults to `INDEXER=container` and leaves the database untouched.
+>
+> One correction to Plan B below: a native `aarch64-elf-g++` *can* serve as the indexer's driver
+> after all, but only because `INDEXER=host` supplies the C++ headers separately from the
+> container. On its own the objection below still stands exactly as written.
+>
+> The Docker connection uses `unix://$USER_HOME$/.docker/run/docker.sock`, which on this Mac is a
+> symlink to colima's socket. That works, and is worth knowing before you go looking for a Docker
+> Desktop setting that does not exist here.
 
 **Recommendation: use CLion's Docker toolchain.**
 
@@ -171,8 +255,8 @@ Declarations like `extern "C" char __bss_start[];` are correct C++ and CLion res
 but it cannot know they come from the linker script, so "go to definition" leads nowhere. That is
 inherent, not a misconfiguration.
 
-**After changing flags or adding files:** re-run `make compdb`, then
-**File → Reload CMake/Makefile Project**. Stale index data is the cause of a surprising share of
+**After changing flags or adding files:** re-run `./scripts/compdb.sh`, then
+**File → Reload Project**. Stale index data is the cause of a surprising share of
 "CLion is broken" moments.
 
 ---

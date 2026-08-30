@@ -38,19 +38,36 @@ CMD=(
 )
 [[ ${#QEMU_EXTRA[@]} -gt 0 ]] && CMD+=( "${QEMU_EXTRA[@]}" )
 
+# The cross debugger's name differs per platform and both are correct:
+# gdb-multiarch on Ubuntu/WSL, aarch64-elf-gdb from Homebrew on macOS. Print
+# the one that actually exists on THIS machine rather than a name the reader
+# has to translate before pasting.
+GDB=""
+for g in gdb-multiarch aarch64-elf-gdb aarch64-none-elf-gdb; do
+    if command -v "${g}" >/dev/null 2>&1; then GDB="${g}"; break; fi
+done
+if [[ -z "${GDB}" ]]; then
+    GDB="gdb-multiarch   # NOT INSTALLED -- see docs/onboarding.md"
+fi
+
 cat >&2 <<EOF
 + ${CMD[*]}
 
 QEMU is halted, waiting for a debugger. In another terminal, paste:
 
-    gdb-multiarch -ex 'target remote :1234' ${KERNEL}
+    ${GDB} -ex 'target remote :1234' ${KERNEL}
 
 Useful first commands once attached:
 
     (gdb) break _start          # or: break kernel_main
     (gdb) continue              # releases the CPU -- nothing runs until you do
     (gdb) layout asm            # source view is thin until you are out of asm
-    (gdb) info registers        # x0 should hold the DTB pointer at entry
+    (gdb) info registers        # see the note on x0 below
+
+Note on x0: when QEMU boots an ELF via -kernel it jumps straight to the ELF
+entry point -- it installs no boot stub at the start of RAM and loads no device
+tree, so x0 is 0 and is NOT a DTB pointer. Passing the DTB in x0 belongs to the
+raw-image boot path, not ours. (Measured on QEMU 11.1.0, -machine virt.)
 
 Note: the debug profile is built with -O0 precisely so that stepping matches
 the source. Debugging a -O2 build will appear to jump around at random; that
