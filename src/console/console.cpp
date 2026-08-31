@@ -1,4 +1,10 @@
-#include "uart.h"
+//
+// Created by Nachum Getzel Elkind on 31/08/2026.
+//
+
+#include "console.h"
+
+#include <cstdint>
 const auto UART_BASE = reinterpret_cast<volatile uint8_t*>(0x09000000);
 const auto UART_FLAGS = reinterpret_cast<volatile uint32_t*>(0x9000018);
 void print_symbol(const char ch) {
@@ -13,7 +19,7 @@ int read_input(char* buffer, const int max_length) {
         const char c = read_symbol();
         if (c == static_cast<char>(KEYS::BACKSPACE_FIRST) || c == static_cast<char>(KEYS::BACKSPACE_SECOND)) {
             if (i > 0) {
-                print_string("\b \b"); //b moves cursor to one pos left, space override char with emptiness, backspace going left after the space moved the cursor again
+                print("\b \b"); //b moves cursor to one pos left, space override char with emptiness, backspace going left after the space moved the cursor again
                 --i;
             }
             continue;
@@ -35,20 +41,12 @@ int read_input(char* buffer, const int max_length) {
     buffer[i] = 0;
     return i;
 }
-bool are_string_equals(const char* f, const char* s) {
-    for (int i = 0; f[i] || s[i]; ++i) {
-        if (f[i] != s[i]) {
-            return false;
-        }
-    }
-    return true;
-}
 char read_symbol() {
     while (*UART_FLAGS >> 4 & 1) {
     } // no char to read
     return static_cast<char>(*UART_BASE);
 }
-void print_string(const char* string) {
+void print(const char* string) {
     for (int i = 0; string[i]; ++i) {
         if (string[i] != '\n') {
             print_symbol(string[i]);
@@ -59,8 +57,8 @@ void print_string(const char* string) {
     }
 }
 void println (const char* string) {
-    print_string(string);
-    print_string("\n");
+    print(string);
+    print("\n");
 }
 void print_hex(uint64_t value) {
     char values[16];
@@ -71,7 +69,7 @@ void print_hex(uint64_t value) {
         value /= 16;
     } while (value != 0);
 
-    print_string("0x");
+    print("0x");
     for (; i > 0; --i) {
         print_symbol(values[i - 1]);
     }

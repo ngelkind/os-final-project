@@ -92,14 +92,63 @@ echo "command  : ${CMD[*]}"
 echo "================================================================"
 
 # --- Run ---------------------------------------------------------------------
-# timeout --foreground: without it, timeout puts the child in its own process
-# group and QEMU cannot receive the terminal signals that let Ctrl-C work when
-# a human runs this locally.
 #
-# A hung kernel MUST fail the job rather than occupy a runner for six hours,
-# so the timeout is not optional and is not generous.
+# GNU coreutils' `timeout` is not present on macOS, which is the primary dev
+# machine here. Without a fallback this script reports "no [BOOT] line" -- a
+# kernel failure -- when what actually happened is that the harness could not
+# start QEMU at all. A test harness that blames the code under test for its own
+# missing dependency is worse than no harness, so resolve a timeout
+# implementation once, here, and fall back to a shell watchdog.
+#
+#   timeout   GNU coreutils (Linux, the CI container)
+#   gtimeout  same binary under Homebrew's coreutils on macOS
+#   (neither) the run_with_timeout function below
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_BIN="gtimeout"
+else
+    TIMEOUT_BIN=""
+fi
+
+# Shell fallback. Runs the command in the background with a sleeping watchdog
+# alongside it; whichever finishes first, the other is cleaned up.
+#
+# It reports 124 on timeout to match GNU timeout, because the verdict logic
+# below keys on that number. It cannot distinguish "the watchdog killed it"
+# from "some other signal killed it" -- both arrive as an exit status >= 128 --
+# so both are reported as a timeout. That is a real difference from GNU
+# timeout, and the reason `timeout`/`gtimeout` is still preferred when present.
+run_with_timeout() {
+    local secs="$1"; shift
+    "$@" &
+    local child=$!
+    ( sleep "${secs}"; kill -TERM "${child}" 2>/dev/null; \
+      sleep 2;         kill -KILL "${child}" 2>/dev/null ) &
+    local watchdog=$!
+
+    local rc=0
+    wait "${child}" || rc=$?
+
+    kill "${watchdog}" 2>/dev/null || true
+    wait "${watchdog}" 2>/dev/null || true
+
+    [[ ${rc} -ge 128 ]] && return 124
+    return ${rc}
+}
+
 set +e
-timeout --foreground "${TIMEOUT_SECONDS}s" "${CMD[@]}" 2>&1 | tee "${SERIAL_LOG}"
+if [[ -n "${TIMEOUT_BIN}" ]]; then
+    # --foreground: without it, timeout puts the child in its own process group
+    # and QEMU cannot receive the terminal signals that let Ctrl-C work when a
+    # human runs this locally.
+    #
+    # A hung kernel MUST fail the job rather than occupy a runner for six
+    # hours, so the timeout is not optional and is not generous.
+    "${TIMEOUT_BIN}" --foreground "${TIMEOUT_SECONDS}s" "${CMD[@]}" 2>&1 | tee "${SERIAL_LOG}"
+else
+    run_with_timeout "${TIMEOUT_SECONDS}" "${CMD[@]}" 2>&1 | tee "${SERIAL_LOG}"
+fi
 QEMU_STATUS="${PIPESTATUS[0]}"
 set -e
 

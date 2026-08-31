@@ -61,7 +61,7 @@ vector_table:
         ldp x2, x3, [sp], #16
         ldp x0, x1, [sp], #16
 
-        b .
+        eret
 
 
 .balign 128

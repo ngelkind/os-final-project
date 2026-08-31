@@ -1,25 +1,27 @@
-#include "uart.h"
+#include "console.h"
+#include "string.h"
 constexpr int MAX_INPUT_LENGTH = 128;
 int s;
 extern "C" void kernel_main() {
-    asm volatile("svc #0");
+    // asm volatile("svc #0");
     //TODO: CHANGE FUNCTION TO BE ONLY AN ENTRY POINT AND NOT A FULL MENU
     //TODO: CREATE MAP-LIKE FUNCTION FOR COMMAND CALLING
     while (true) {
-        print_string(">>");
+        print(">> ");
         char input [MAX_INPUT_LENGTH + 1];
         if (read_input(input, MAX_INPUT_LENGTH) == -1) {
-            print_string("command is too long. try a shorter command.");
-            break;
+            println("command is too long. try a shorter command.");
+            continue;
         }
         if (are_string_equals(input, "help")) {
-            print_string("currently supported only commands: hello world and help :-)\n");
+            println("help is here: currently supported only commands: hello world and help :-)");
         }
         else if (are_string_equals(input, "hello world")) {
-            print_string("hello, cyber\n"); //TODO: to create a better answer for hello world
+            println("hello, cyber"); //TODO: to create a better answer for hello world
         }
         else {
-            print_string("unsupported command. please run help for list of available commands\n");
+            print("command not found: ");
+            println (input);
         }
     }
 }

@@ -100,6 +100,12 @@ DOCKER_PLATFORM=()
 
 # --- 1. Generate, with the repo mounted where the host expects it ------------
 #
+# HOST_CURDIR tells the Makefile where the repo lives on THIS machine, so its
+# index guard can compare that against the directory it is actually building in
+# instead of guessing. They match here by construction; they would not under a
+# -w /work or -w /w mount, and the Makefile then declines to write the database
+# rather than filling it with paths the IDE cannot resolve.
+#
 # -v "$REPO_ROOT":"$REPO_ROOT" -w "$REPO_ROOT" is the whole of fix 1. It also
 # makes -ffile-prefix-map=$(CURDIR)=. strip the same prefix it would strip in a
 # host build, so the debug info stays consistent between the two.
@@ -112,7 +118,7 @@ info "generating compile_commands.json in ${IMAGE}"
 BUILD_RC=0
 docker run --rm "${DOCKER_PLATFORM[@]}" \
     -v "${REPO_ROOT}":"${REPO_ROOT}" -w "${REPO_ROOT}" \
-    "${IMAGE}" make -k compdb || BUILD_RC=$?
+    "${IMAGE}" make -k HOST_CURDIR="${REPO_ROOT}" compdb || BUILD_RC=$?
 
 [[ -f compile_commands.json ]] || die "the container did not produce compile_commands.json."
 

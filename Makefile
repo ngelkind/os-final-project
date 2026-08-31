@@ -514,7 +514,28 @@ COMPDB ?= 1
 # producing exactly the "does not belong to any project target" failure this
 # is meant to prevent. Rather than silently overwriting a good database with a
 # useless one, such a build skips the index and says so.
-COMPDB_PORTABLE := $(if $(filter /work,$(CURDIR)),,1)
+#
+# Two checks, because a container cannot see the host filesystem to verify a
+# path directly.
+#
+#   HOST_CURDIR  When set, it is the caller asserting where the repo lives on
+#                the host, and $(CURDIR) must equal it exactly. scripts/compdb.sh
+#                sets it. This is the precise check.
+#
+#   Depth        The fallback, for a build the IDE drives itself with no
+#                HOST_CURDIR to compare against. A host checkout is never a
+#                top-level directory: it is /Users/you/..., /home/you/... or
+#                /mnt/c/... -- at least two components. A single-component
+#                $(CURDIR) is therefore always a container mount point, which
+#                is what /work and the hand-rolled /w that motivated this both
+#                are. Written as "does the directory part of $(CURDIR) differ
+#                from /", which is true for /Users/you/os and false for /w.
+#
+# An earlier version filtered only the literal string /work. A manual
+# docker run -v "$$PWD":/w -w /w slipped past it and overwrote a working
+# database with /w paths, silently costing the IDE every symbol in the kernel.
+COMPDB_DEEP    := $(if $(filter-out /,$(dir $(CURDIR))),1,)
+COMPDB_PORTABLE := $(if $(HOST_CURDIR),$(if $(filter $(HOST_CURDIR),$(CURDIR)),1,),$(COMPDB_DEEP))
 
 # $(call compdb-fragment,object,source,full command line)
 #
@@ -573,7 +594,14 @@ else ifneq ($(COMPDB),1)
 	@:
 else
 	@echo "  note    compile_commands.json not updated: \$$(CURDIR) is $(CURDIR),"
-	@echo "          which does not exist on the host running the IDE."
+ifdef HOST_CURDIR
+	@echo "          but HOST_CURDIR says the repo lives at $(HOST_CURDIR)."
+else
+	@echo "          a top-level path, so it is a container mount point and"
+	@echo "          does not exist on the host running the IDE."
+endif
+	@echo "          The existing database was left alone rather than replaced"
+	@echo "          with entries the IDE cannot match to any file."
 	@echo "          Use scripts/compdb.sh, which mounts the repo at its host path."
 endif
 
