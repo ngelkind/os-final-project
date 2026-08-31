@@ -48,12 +48,9 @@ char read_symbol() {
 }
 void print(const char* string) {
     for (int i = 0; string[i]; ++i) {
-        if (string[i] != '\n') {
-            print_symbol(string[i]);
-        } else {
+        if (string [i] == '\n')
             print_symbol('\r'); // r for moving the cursor to the beg of the line
-            print_symbol('\n');
-        }
+        print_symbol(string[i]);
     }
 }
 void println (const char* string) {
