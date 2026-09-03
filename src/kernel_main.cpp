@@ -6,6 +6,8 @@ extern "C" void kernel_main() {
     // asm volatile("svc #0");
     //TODO: CHANGE FUNCTION TO BE ONLY AN ENTRY POINT AND NOT A FULL MENU
     //TODO: CREATE MAP-LIKE FUNCTION FOR COMMAND CALLING
+    // "[BOOT]" is the boot banner the serial contract requires, see docs/ci.md section 2
+    println("[BOOT] kernel aarch64 virt");
     while (true) {
         print(">> ");
         char input [MAX_INPUT_LENGTH + 1];
