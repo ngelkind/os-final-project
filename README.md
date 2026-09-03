@@ -176,4 +176,5 @@ than assumed; until then, log parsing owns the pass/fail decision.
 | [docs/onboarding.md](docs/onboarding.md) | Fresh-machine setup for Windows, macOS and Linux; mixed-OS gotchas |
 | [docs/ci.md](docs/ci.md) | The pipeline, the interface contract, flag reasoning, pinned versions |
 | [docs/clion.md](docs/clion.md) | CLion on macOS against the containerised toolchain, and debugging QEMU |
+| [docs/clion-windows.md](docs/clion-windows.md) | CLion on Windows/WSL2 against the native WSL toolchain, and debugging QEMU |
 | [docs/adr/](docs/adr/) | One-page architecture decision records |
