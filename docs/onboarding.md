@@ -69,6 +69,29 @@ Windows development happens **inside WSL2**. There is deliberately no Windows-na
 maintaining two of them means the second one is broken half the time and nobody notices until a
 deadline.
 
+### The short way: one script
+
+Two things happen on Windows itself. Everything else is one script, run inside Ubuntu.
+
+1. From an **Administrator** PowerShell: `wsl --install -d Ubuntu-24.04`. Reboot. When Ubuntu
+   opens for the first time, pick a Linux username and password.
+2. Get `scripts/bootstrap-wsl.sh` into Ubuntu. It is in this repository; a teammate can send you
+   that one file, or you can download it from GitHub once you have accepted the collaborator
+   invitation. Then, inside Ubuntu:
+
+   ```sh
+   bash bootstrap-wsl.sh
+   ```
+
+The script installs the packages, configures Docker Engine, logs you in to GitHub in your browser,
+clones the repository into `~/projects`, and finishes by running `scripts/setup.sh`, the same
+verifier every platform uses. It is safe to run again at any point: every step checks whether it
+is already done. It pauses exactly once if WSL has to be restarted for systemd to start, and tells
+you what to type (`wsl --shutdown` in PowerShell, then reopen Ubuntu and run it again).
+
+Sections 1 to 4 below are what the script does, written out. Read them when you want to
+understand a step or when something fails and you need to know which step it was.
+
 ### 1. WSL2
 
 From an **Administrator** PowerShell:

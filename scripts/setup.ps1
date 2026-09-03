@@ -145,20 +145,27 @@ Write-Host "Everything from here runs inside Linux. Open WSL:"
 Write-Host ""
 Write-Host "    wsl"
 Write-Host ""
-Write-Host "Then, INSIDE WSL, clone into the Linux filesystem -- not /mnt/c:"
+Write-Host "Then, INSIDE WSL, run the one-script installer. It is"
+Write-Host "scripts/bootstrap-wsl.sh in the repository. If you do not have the"
+Write-Host "repository yet, ask a teammate for that one file (or download it from"
+Write-Host "GitHub once you have accepted the collaborator invitation), then:"
+Write-Host ""
+Write-Host "    bash bootstrap-wsl.sh"
+Write-Host ""
+Write-Host "It installs the packages, sets up Docker, logs you in to GitHub,"
+Write-Host "clones the repository into ~/projects and runs scripts/setup.sh."
+Write-Host "It pauses once if WSL needs a restart and tells you what to type."
+Write-Host ""
+Write-Host "Prefer to do it by hand? Every step is in docs/onboarding.md, under"
+Write-Host "'Windows'. The short version:"
 Write-Host ""
 Write-Host "    mkdir -p ~/projects && cd ~/projects"
-Write-Host "    git clone <repo-url>"
+Write-Host "    git clone https://github.com/ngelkind/os-final-project.git"
 Write-Host "    cd os-final-project"
 Write-Host "    bash scripts/setup.sh"
 Write-Host ""
-Write-Host "The ~/ location is a requirement, not a preference. A repo under" -ForegroundColor Yellow
-Write-Host "/mnt/c crosses the Windows-Linux filesystem bridge: builds run" -ForegroundColor Yellow
-Write-Host "several times slower, file watching is unreliable, and the git" -ForegroundColor Yellow
-Write-Host "executable bit does not persist." -ForegroundColor Yellow
-Write-Host ""
-Write-Host "scripts/setup.sh will then check for Docker and tell you exactly"
-Write-Host "what to do if it is missing. See docs/onboarding.md for the full"
-Write-Host "walkthrough, including enabling systemd so the Docker daemon starts"
-Write-Host "automatically."
+Write-Host "Either way, the repository lives under ~/ inside WSL, never under" -ForegroundColor Yellow
+Write-Host "/mnt/c. A repo on the Windows drive crosses the WSL filesystem" -ForegroundColor Yellow
+Write-Host "bridge: builds run several times slower, file watching is" -ForegroundColor Yellow
+Write-Host "unreliable, and the git executable bit does not persist." -ForegroundColor Yellow
 Write-Host ""

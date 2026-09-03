@@ -25,8 +25,10 @@ nothing and starts no daemons — if something is missing it tells you exactly w
 Full walkthrough for every platform, including Windows/WSL2 and Apple Silicon:
 **[docs/onboarding.md](docs/onboarding.md)**.
 
-> **Windows:** clone into the WSL filesystem (`~/projects/...`), never `/mnt/c/...`. This is a
-> requirement — see [the gotchas](docs/onboarding.md#mixed-os-gotchas).
+> **Windows:** install WSL2 with Ubuntu 24.04, then run `bash scripts/bootstrap-wsl.sh` inside
+> Ubuntu — it installs everything, clones the repository, and runs the verifier. Clone into the WSL
+> filesystem (`~/projects/...`), never `/mnt/c/...`. This is a requirement — see
+> [the gotchas](docs/onboarding.md#mixed-os-gotchas).
 
 ### Everyday commands
 
