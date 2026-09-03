@@ -91,7 +91,7 @@ Every pull request runs, inside the same container you build in locally:
 | `hygiene` | No CRLF, no filename-case traps, scripts still executable |
 | `format` | Code matches `.clang-format` |
 | `build` | Compiles clean at `-O0` **and** `-O2`, with `-Werror` |
-| `qemu-smoke` | The kernel boots, prints its banner, does not panic or hang |
+| `qemu-smoke` | The kernel boots, prints its banner, does not panic |
 | `qemu-tests` | The in-kernel suite runs and every test passes |
 | `summary` | The single required check branch protection points at |
 

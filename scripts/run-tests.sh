@@ -115,15 +115,20 @@ fi
 # alongside it; whichever finishes first, the other is cleaned up.
 #
 # It reports 124 on timeout to match GNU timeout, because the verdict logic
-# below keys on that number. It cannot distinguish "the watchdog killed it"
-# from "some other signal killed it" -- both arrive as an exit status >= 128 --
-# so both are reported as a timeout. That is a real difference from GNU
-# timeout, and the reason `timeout`/`gtimeout` is still preferred when present.
+# below keys on that number. The watchdog leaves a marker file when it fires,
+# and that marker -- not the child's exit status -- is what decides "timed
+# out". The exit status alone is not enough: QEMU catches SIGTERM and exits 0
+# ("terminating on signal 15"), which would otherwise look like a clean exit.
+# Like GNU timeout, a run the watchdog had to kill is a timeout regardless of
+# what the child said on its way out.
 run_with_timeout() {
     local secs="$1"; shift
+    local fired
+    fired="$(mktemp)"; rm -f "${fired}"
+
     "$@" &
     local child=$!
-    ( sleep "${secs}"; kill -TERM "${child}" 2>/dev/null; \
+    ( sleep "${secs}"; touch "${fired}"; kill -TERM "${child}" 2>/dev/null; \
       sleep 2;         kill -KILL "${child}" 2>/dev/null ) &
     local watchdog=$!
 
@@ -133,7 +138,10 @@ run_with_timeout() {
     kill "${watchdog}" 2>/dev/null || true
     wait "${watchdog}" 2>/dev/null || true
 
-    [[ ${rc} -ge 128 ]] && return 124
+    if [[ -e "${fired}" ]]; then
+        rm -f "${fired}"
+        return 124
+    fi
     return ${rc}
 }
 
@@ -188,8 +196,23 @@ count() { grep -cE "$1" "${CLEAN_LOG}" || true; }
 # --- Decide, in the order specified by docs/ci.md section 2.6 ----------------
 
 # 1. Timeout. GNU timeout reports 124 when it had to kill the child.
+#
+#    ktest mode: a hang. The suite must run to completion and ask QEMU to exit
+#    via semihosting; reaching the timeout means it did not.
+#
+#    smoke mode: expected, not a failure. The kernel is an interactive shell
+#    that waits on the UART for input forever and never asks QEMU to exit.
+#    From the outside, "hung" and "idle at its prompt" are the same picture,
+#    and telling them apart would need a liveness probe (send a command,
+#    expect a reply) that couples this harness to the shell's command set. So
+#    smoke asserts only what it can observe: the banner appeared and nothing
+#    panicked. The timeout still bounds the job. See docs/ci.md section 2.6.
+TIMED_OUT=0
 if [[ "${QEMU_STATUS}" -eq 124 ]]; then
-    fail "kernel hung -- no exit within ${TIMEOUT_SECONDS}s"
+    if [[ "${MODE}" == "ktest" ]]; then
+        fail "kernel hung -- no exit within ${TIMEOUT_SECONDS}s"
+    fi
+    TIMED_OUT=1
 fi
 
 # 2. Panic, in any mode.
@@ -209,6 +232,10 @@ was not drained before the kernel halted."
 fi
 
 if [[ "${MODE}" == "smoke" ]]; then
+    if [[ "${TIMED_OUT}" -eq 1 ]]; then
+        pass "kernel booted, printed its banner, and did not panic. \
+It was still running at the ${TIMEOUT_SECONDS}s timeout, which is what an interactive kernel does."
+    fi
     pass "kernel booted, printed its banner, and did not panic."
 fi
 

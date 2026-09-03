@@ -247,7 +247,7 @@ Evaluated in order; the first match wins:
 
 | Condition | Verdict |
 |---|---|
-| the timeout expired | **FAIL** — "kernel hung". Last 50 log lines printed. |
+| test mode, and the timeout expired | **FAIL** — "kernel hung". Last 50 log lines printed. |
 | any `[PANIC]` line | **FAIL** |
 | test mode, and no `[KTEST] DONE` | **FAIL** — "output truncated" |
 | test mode, and summary reports non-zero failed | **FAIL** |
@@ -257,6 +257,15 @@ Evaluated in order; the first match wins:
 
 The cross-check in row five is cheap insurance: it catches a kernel that printed a cheerful
 summary while half its tests never ran.
+
+In **smoke mode the timeout is not a failure**. The kernel is an interactive shell: it prints its
+banner, shows a prompt, and waits on the UART for input forever. It never asks QEMU to exit, so
+every smoke run ends at the timeout. Seen from outside, a kernel idle at its prompt and a kernel
+that hung look identical, and telling them apart would need a liveness probe (send a command,
+expect a reply) that couples the harness to the shell's command set. So smoke asserts only what it
+can observe: the banner appeared, and nothing panicked. Test mode is where completion is asserted,
+because there the kernel is expected to run its suite and exit through semihosting. The timeout
+still bounds the job in both modes, so a runner is never occupied for longer than it.
 
 #### Practical notes
 
@@ -313,6 +322,14 @@ from a blog post is not evidence.
 | Register holding the DTB pointer at entry | `x0` | UNVERIFIED |
 | Exception level at entry | EL1 (`virt` defaults to `virtualization=off`, `secure=off`) | UNVERIFIED |
 | GIC | v2, pinned by `gic-version=2` | pinned by us |
+| Network device | none, pinned by `-nic none` | pinned by us |
+
+`-nic none` is there for a reason that is easy to forget: without it QEMU adds a default
+virtio-net card and refuses to start unless it can load that card's PXE boot ROM
+(`efi-virtio.rom`). Homebrew's QEMU bundles the ROM; Ubuntu ships it in a separate `ipxe-qemu`
+package that the container image does not install. The symptom was a kernel that booted on the Mac
+and died in CI with `failed to find romfile` before executing an instruction. The kernel has no
+network driver, so the fix is to not have the device.
 
 Two ways to confirm them yourself, both worth doing once:
 

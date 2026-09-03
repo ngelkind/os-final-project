@@ -69,6 +69,18 @@ QEMU_MACHINE=(
   # kernel does nothing compute-heavy. Stated explicitly rather than left
   # implicit so nobody spends a weekend chasing nested virtualisation.
   -accel tcg
+
+  # No network card. Left to itself QEMU adds a default virtio-net PCI device
+  # and insists on loading its PXE boot ROM (efi-virtio.rom, from the ipxe-qemu
+  # package). Ubuntu ships that ROM only as a Recommends of qemu-system-arm, so
+  # the container image -- built with --no-install-recommends -- does not have
+  # it, and QEMU exits with 'failed to find romfile' before the guest runs a
+  # single instruction. Homebrew's QEMU bundles the ROM, which is why the same
+  # kernel booted on the Mac and not in CI. This kernel has no network driver,
+  # so the honest fix is to not have the device, rather than to ship a ROM for
+  # hardware we never touch. It also keeps the device tree identical on every
+  # host, which is what the platform facts in docs/ci.md assume.
+  -nic none
 )
 
 # --- Safety ------------------------------------------------------------------
