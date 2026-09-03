@@ -22,3 +22,4 @@ scratch/
 # points at live in ~/.cache, outside the repo, so they need no rule here.
 compile_commands.json
 compile_commands.raw.json
+CLAUDE.md
