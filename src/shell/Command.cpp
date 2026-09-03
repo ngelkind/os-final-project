@@ -1,3 +1,5 @@
-//
-// Created by Nachum Getzel Elkind on 31/08/2026.
-//
+struct Command {
+    const char* name;
+    int (*handler)(void* ctx, int argc, const char* const* argv);
+    const char* help;
+};
