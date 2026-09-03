@@ -59,16 +59,41 @@ builds expose the same share under different names.
 
 **Settings → Build, Execution, Deployment → Toolchains → `+` → WSL.**
 
-- **Distribution**: the Ubuntu-24.04 distro `bootstrap-wsl.sh` installed. CLion should list it —
-  this is a standard, first-party CLion toolchain type, not a manual environment hookup.
+**Verified 2026-09-03, corrected from the version originally written here** (see the honesty note
+at the top): the dialog has more fields than described below, and CLion pre-fills two of them
+wrong.
+
+- **Distribution**: the Ubuntu-24.04 distro `bootstrap-wsl.sh` installed. CLion lists it — this is
+  a standard, first-party CLion toolchain type, not a manual environment hookup.
+- **CMake** and **Build Tool**: CLion showed both as *"Not found, please install this package"*,
+  and the toolchain reported *"Test CMake run finished with errors."* This looks alarming for a
+  project with no `CMakeLists.txt`, but it is expected: CLion learns a compiler's built-in macros
+  and header search path by running a small internal CMake probe project, regardless of what build
+  system the actual project uses (`docs/clion.md` §2 describes the same interrogation for the
+  Docker toolchain). This is exactly the reason commit `915e6a7`, *"docker: add cmake so CLion can
+  detect the cross compilers,"* added `cmake` to the container image for the Mac setup — same
+  requirement, different toolchain. Fix it the same way, inside WSL:
+  ```sh
+  sudo apt-get update
+  sudo apt-get install -y cmake
+  ```
+  `bootstrap-wsl.sh` already installs `make`; confirm with `which make` if the Build Tool field
+  still does not resolve after installing `cmake`. Reopen the toolchain dialog (or hit **Apply**)
+  once both are installed.
 - **C Compiler**: set explicitly to `/usr/bin/aarch64-linux-gnu-gcc`.
 - **C++ Compiler**: set explicitly to `/usr/bin/aarch64-linux-gnu-g++`.
-  Do not let CLion auto-detect either of these — left alone it will find the *native* WSL
-  `gcc`/`g++`, which target x86-64, not our freestanding AArch64 kernel. This is the identical trap
-  `docs/clion.md` §2 warns about for the Docker toolchain, one level removed.
-- **Debugger**: `/usr/bin/gdb-multiarch`. Not CLion's bundled debugger — it is built for the host
-  architecture and cannot debug AArch64, the same fact `docs/clion.md` §5 states for macOS.
-- **Make**: should auto-detect `/usr/bin/make` inside the distro.
+  Do not let CLion auto-detect either of these. Left alone, CLion filled *both* the C and C++
+  fields with `aarch64-linux-gnu-gcc` — the C driver in both slots, never offering `g++` at all.
+  That is the same wrong-compiler trap `docs/clion.md` §2 warns about for the Docker toolchain, one
+  level removed, and CLion does not catch it for you; it must be typed in by hand.
+- **Debugger**: `/usr/bin/gdb-multiarch`, typed as a plain WSL path. CLion's auto-fill produced
+  `\bin\gdb-multiarch` here — Windows-style backslashes and a missing `/usr` — which happened to
+  still resolve (green checkmark, version reported), but is not a path worth trusting once things
+  get more complicated later. Retype it explicitly. Not CLion's bundled debugger either way — that
+  one is built for the host architecture and cannot debug AArch64, the same fact `docs/clion.md`
+  §5 states for macOS.
+- You may see a note that *"the toolchain Debugger is deprecated, use Debug Profiles instead."*
+  That is a newer CLion preference, not an error — safe to ignore for the setup in §5 below.
 
 Then **Settings → Build, Execution, Deployment → Makefile** and select this WSL toolchain.
 
