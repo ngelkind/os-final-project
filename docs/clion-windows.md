@@ -118,21 +118,34 @@ If files still show as unindexed or `uint64_t` as unknown after that, the fix is
 
 ---
 
-## 4. Run configuration: `make run`
+## 4. Run configurations: point CLion at the checked-in scripts
 
-**Run → Edit Configurations → `+` → Shell Script.**
+These match the four native, non-container configurations on the Mac
+(`build + run (QEMU)`, `run QEMU (native)`, `debug QEMU halted (native)`, `attach to QEMU` — see
+`.idea/runConfigurations/` in `docs/clion.md`'s setup, which is git-ignored per developer, so it
+cannot simply be copied over). The Windows counterparts live as real files in the repository,
+under `scripts/windows/`, because the one fragile, version-dependent part of a Windows Shell
+Script configuration is *which interpreter CLion uses to run typed script text* — a detail I
+cannot verify without a Windows CLion to test on (see the honesty note at the top). Pointing a
+configuration at a checked-in `.cmd` file sidesteps that entirely: Windows always knows how to run
+a `.cmd` file directly, regardless of what CLion's interpreter setting defaults to.
 
-- **Name**: `run (QEMU)`
-- **Script text**:
-  ```
-  wsl.exe -d Ubuntu-24.04 -e bash -lc "cd ~/projects/os-final-project && make run"
-  ```
-  Adjust the path to wherever `bootstrap-wsl.sh` actually cloned the repository (it printed that
-  path when it finished). Invoking `wsl.exe` directly, rather than relying on CLion's Shell Script
-  configuration to route through the WSL toolchain implicitly, is the one part of this document
-  chosen for certainty over elegance: it works the same way regardless of which CLion version or
-  build is running, because it is Windows launching a real WSL command, not an IDE-internal
-  routing decision.
+Each file has a comment at the top saying what to edit if your distro name (check with
+`wsl -l -v` in PowerShell) or clone path differs from the default.
+
+| File | Matches the Mac configuration | What it does |
+|---|---|---|
+| `scripts/windows/build-and-run-qemu.cmd` | `build + run (QEMU)` | Native `make PROFILE=debug`, then boots it |
+| `scripts/windows/run-qemu-native.cmd` | `run QEMU (native)` | Boots whatever is already built |
+| `scripts/windows/debug-qemu-halted.cmd` | `debug QEMU halted (native)` | Boots halted, waiting for gdb on `:1234` |
+| `scripts/windows/kill-qemu.cmd` | (no Mac CLion configuration; run from a terminal there) | Kills any QEMU left running after a closed window — see §7 |
+
+For each of the first three, **Run → Edit Configurations → `+` → Shell Script**:
+
+- **Name**: matching the table above, e.g. `build + run (QEMU)`.
+- **Execute**: switch from *Script text* to *Script path* (the exact wording may read
+  *"Execute script file"* instead, depending on CLion version), then **Browse** to the matching
+  `.cmd` file under `scripts\windows\`.
 - **Execute in terminal**: ticked. This is not optional, for the same reason `docs/clion.md` §4
   gives: QEMU's serial console is interactive, and Ctrl-A then X (the quit sequence) needs a real
   terminal underneath it. In CLion's plain output pane there is no way to send that sequence, and
@@ -145,14 +158,9 @@ If files still show as unindexed or `uint64_t` as unknown after that, the fix is
 Same two-step pattern as `docs/clion.md` §5: one configuration boots QEMU halted, a second one
 attaches a debugger to it.
 
-### Step 1 — `make debug`
+### Step 1 — `debug QEMU halted (native)`
 
-Duplicate the Shell Script configuration above, name it `debug (QEMU halted)`, script text:
-
-```
-wsl.exe -d Ubuntu-24.04 -e bash -lc "cd ~/projects/os-final-project && make debug"
-```
-
+The third Shell Script configuration from §4, pointed at `scripts/windows/debug-qemu-halted.cmd`.
 This starts QEMU with the CPU halted, waiting for a debugger on port 1234, and prints the exact
 `gdb` command line to the terminal — useful for comparing against what CLion ends up doing.
 
@@ -180,7 +188,7 @@ This starts QEMU with the CPU halted, waiting for a debugger on port 1234, and p
 
 ### Using it
 
-1. Run `debug (QEMU halted)`. QEMU starts and halts before the first instruction.
+1. Run `debug QEMU halted (native)`. QEMU starts and halts before the first instruction.
 2. Run `attach to QEMU`.
 3. Set a breakpoint on `kernel_main` and continue.
 
@@ -189,7 +197,25 @@ makes stepping match the source line-for-line.
 
 ---
 
-## 6. If any of this fights you
+## 7. Killing a QEMU left running after a closed window
+
+Same problem `scripts/kill-qemu.sh` solves on macOS (see the comment at the top of that file):
+closing a terminal or a WSL window does not stop QEMU running inside it, and this kernel never
+halts on its own, so an abandoned run pins a CPU core at 100% indefinitely. The script itself
+already works unmodified inside WSL — it is plain, portable bash — so the only thing needed on
+Windows is a way to reach it without opening a WSL terminal by hand.
+
+**`scripts/windows/kill-qemu.cmd`** does that. Run it directly — double-click it in Explorer, or
+from PowerShell/cmd — whenever a run or debug session was closed rather than quit cleanly with
+Ctrl-A X. `kill-qemu.cmd --list` shows what it would kill without killing it.
+
+To reach it from inside CLion the same way as the others, add one more Shell Script configuration
+following §4's recipe, named `kill QEMU`, pointed at `scripts/windows/kill-qemu.cmd`. It does not
+need **Execute in terminal** ticked — it prints a short report and exits on its own.
+
+---
+
+## 8. If any of this fights you
 
 - **The WSL toolchain does not appear in Settings → Toolchains at all.** This CLion feature has a
   minimum supported version; if it is missing entirely, update CLion. It is not something to work
