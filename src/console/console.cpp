@@ -20,6 +20,7 @@ int read_input(char* buffer, const int max_length) {
         if (c == static_cast<char>(KEYS::BACKSPACE_FIRST) || c == static_cast<char>(KEYS::BACKSPACE_SECOND)) {
             if (i > 0) {
                 print("\b \b"); // b moves cursor to one pos left, space override char with emptiness,
+                --i;
             }
             continue;
         }
