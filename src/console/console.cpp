@@ -1,16 +1,16 @@
-//
-// Created by Nachum Getzel Elkind on 31/08/2026.
-//
 
 #include "console.h"
 #include <cstdint>
 #include <thread_db.h>
+#include <wchar.h>
+#include <stdio.h>
+#include <stdarg.h>
 const auto UART_BASE = reinterpret_cast<volatile uint8_t*>(0x09000000);
 const auto UART_FLAGS = reinterpret_cast<volatile uint32_t*>(0x9000018);
 //const auto UART_FLAGS = reinterpret
 void print_symbol(const char ch) {
     while (*UART_FLAGS >> 5 & 1) {
-    } // we wait until the register is free
+    } // we wait until the register is fre
     *UART_BASE = ch;
 }
 int read_input(char* buffer, const int max_length) {
@@ -30,7 +30,7 @@ int read_input(char* buffer, const int max_length) {
         }
         if (i == max_length - 1) {
             while (read_symbol() != static_cast<char>(KEYS::ENTER)) {
-            } // let user finish the command and only then throw an error
+            } // let user finish the command and only then throw an error. after the limit the next characters do NOT got printed
             println();
             buffer[i] = 0;
             return -1;
@@ -54,6 +54,22 @@ void print(const char* string) {
         print_symbol(string[i]);
     }
 }
+void vvprintf(const char* format, va_list args) {
+    
+}
+void printf (const char* format, ...) {
+    va_list args;
+
+    // 1. Initialize the va_list
+    va_start(args, format);
+
+    // 2. Use the 'v' version of the function to accept the va_list
+    vvprintf(format, args);
+
+    // 3. Clean up
+    va_end(args);
+
+}
 void println(const char* string) {
     print(string);
     print("\n");
@@ -75,4 +91,14 @@ void print_hex(uint64_t value) {
 }
 char decimal_to_hex(const int value) {
     return value < 10 ? '0' + value : 'A' + (value - 10);
+}
+// template<typename... Args>
+// void printf (template<typename... Args>
+// )
+print_unsigned (uint64_t value, unsigned base) {
+    char buffer [65];
+    while (value != 0) {
+        
+    }
+
 }
