@@ -74,6 +74,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 \
       git \
       ca-certificates \
+      # Fetch and unpack the Arm GNU Toolchain release below.
+      curl \
+      xz-utils \
       file \
       xxd \
     && rm -rf /var/lib/apt/lists/*
@@ -109,6 +112,49 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
+#  The bare-metal kernel compiler: Arm GNU Toolchain, aarch64-none-elf
+# -----------------------------------------------------------------------------
+# The kernel is built with aarch64-none-elf, not with Ubuntu's
+# aarch64-linux-gnu. Same instructions, different defaults: the Linux compiler
+# assumes Linux (__linux__, default PIE and stack protector, glibc and Linux
+# headers on the include path). none-elf assumes no OS, so every mitigation
+# and every runtime helper in the kernel is one we chose. docs/ci.md section 4
+# has the full reasoning.
+#
+# Ubuntu does not package it, so this is Arm's official binary release. The
+# version and both SHA-256 sums are pinned here: a changed or tampered tarball
+# fails the image build instead of reaching CI. The sums are the ones Arm
+# publishes next to each tarball (<name>.tar.xz.sha256asc).
+#
+# Upgrading: change ARM_GNU_VERSION and both sums together. Releases are
+# listed at https://gitlab.arm.com/tooling/gnu-toolchains-for-arm (Arm moved
+# downloads there from developer.arm.com in 2026).
+ARG ARM_GNU_VERSION=15.3.rel2
+ARG ARM_GNU_SHA256_AMD64=1e4dc409cf4d33ef0a2e92c345f9e340302d355858de9bc3353758b6463895b0
+ARG ARM_GNU_SHA256_ARM64=63942f3f86e69d7beefa2b946bdb23437628529e7b29f97d32229f65d0905e40
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) host=x86_64;  sum="${ARM_GNU_SHA256_AMD64}" ;; \
+        arm64) host=aarch64; sum="${ARM_GNU_SHA256_ARM64}" ;; \
+        *) echo "FATAL: no Arm GNU Toolchain for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    name="arm-gnu-toolchain-${ARM_GNU_VERSION}-${host}-aarch64-none-elf"; \
+    curl -fsSL --retry 3 -o /tmp/toolchain.tar.xz \
+        "https://gitlab.arm.com/api/v4/projects/tooling%2Fgnu-toolchains-for-arm/packages/generic/gnu-toolchain/${ARM_GNU_VERSION}/${name}.tar.xz"; \
+    echo "${sum}  /tmp/toolchain.tar.xz" | sha256sum -c -; \
+    mkdir -p /opt/arm-gnu-toolchain; \
+    tar -xJf /tmp/toolchain.tar.xz -C /opt/arm-gnu-toolchain --strip-components=1; \
+    rm -f /tmp/toolchain.tar.xz; \
+    # Manuals and the bundled gdb are not used (we debug with gdb-multiarch);
+    # dropping them keeps the image smaller.
+    rm -rf /opt/arm-gnu-toolchain/share/doc /opt/arm-gnu-toolchain/share/info \
+           /opt/arm-gnu-toolchain/share/man /opt/arm-gnu-toolchain/bin/aarch64-none-elf-gdb*; \
+    # Symlinked into /usr/local/bin rather than added to PATH via ENV, so that
+    # every way into the container finds them -- including CLion's Docker
+    # toolchain, which runs the compiler by absolute path.
+    ln -s /opt/arm-gnu-toolchain/bin/aarch64-none-elf-* /usr/local/bin/
+
+# -----------------------------------------------------------------------------
 #  Verify -- fail the IMAGE BUILD rather than publish something broken
 # -----------------------------------------------------------------------------
 # Every tool the Makefile and the scripts invoke by name is checked here. A
@@ -121,6 +167,11 @@ RUN set -eux; \
         aarch64-linux-gnu-objcopy \
         aarch64-linux-gnu-objdump \
         aarch64-linux-gnu-size \
+        aarch64-none-elf-g++ \
+        aarch64-none-elf-gcc \
+        aarch64-none-elf-objcopy \
+        aarch64-none-elf-objdump \
+        aarch64-none-elf-size \
         qemu-system-aarch64 \
         gdb-multiarch \
         clang-format \
@@ -141,7 +192,7 @@ RUN set -eux; \
 # boot/ or src/ and leaves no artefact behind.
 RUN set -eux; \
     printf 'void probe(void) {}\n' > /tmp/probe.c; \
-    aarch64-linux-gnu-gcc -ffreestanding -fno-builtin -mgeneral-regs-only \
+    aarch64-none-elf-gcc -ffreestanding -fno-builtin -mgeneral-regs-only \
         -fno-pie -c /tmp/probe.c -o /tmp/probe.o; \
     file /tmp/probe.o | grep -q 'ARM aarch64' \
         || { echo "FATAL: cross compiler did not emit an AArch64 object" >&2; exit 1; }; \
@@ -159,7 +210,7 @@ RUN set -eux; \
       echo "# Toolchain versions baked into this image"; \
       echo "# target platform: ${TARGETARCH}"; \
       echo; \
-      echo "## aarch64-linux-gnu-g++"; aarch64-linux-gnu-g++ --version; \
+      echo "## aarch64-none-elf-g++ (Arm GNU Toolchain ${ARM_GNU_VERSION})"; aarch64-none-elf-g++ --version; \
       echo; \
       echo "## qemu-system-aarch64"; qemu-system-aarch64 --version; \
       echo; \
