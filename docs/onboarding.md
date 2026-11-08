@@ -270,10 +270,10 @@ You may also install a native cross-compiler so builds skip the container layer:
 brew install --cask gcc-aarch64-embedded
 ```
 
-But `docs/clion.md` section 2 documents why this one **cannot** serve as CLion's indexing
-compiler: Homebrew's `aarch64-elf-gcc` is built `--without-headers`, so `#include <cstdint>` fails
-where the container's `aarch64-linux-gnu-g++` succeeds. Useful for a fast command-line build;
-not a substitute for the container.
+That cask is Arm's GNU Toolchain, the same release the container pins (`docker/Dockerfile`), so
+`make` works natively with it. Do not confuse it with Homebrew's `aarch64-elf-gcc` *formula*: that
+one is built `--without-headers`, so `#include <cstdint>` fails (`docs/clion.md` section 2).
+Useful for a fast command-line build; not a substitute for the container.
 
 Native is for speed, the container is for truth. A native compiler is also a *different build*
 from the container's, so `-Werror` may fire on something CI does not see, or miss something CI

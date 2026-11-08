@@ -39,9 +39,11 @@ MAKEFLAGS += --no-builtin-rules
 # and CROSS_COMPILE below are what change -- not twenty scattered assumptions.
 ARCH ?= aarch64
 
-# Which cross-toolchain to invoke. See docs/ci.md for why we use the
-# Linux-targeted cross compiler rather than a bare-metal *-none-elf one.
-CROSS_COMPILE ?= $(ARCH)-linux-gnu-
+# Which cross-toolchain to invoke: the bare-metal Arm GNU Toolchain. A
+# *-linux-gnu compiler would also produce AArch64 code, but with Linux defaults
+# (__linux__, default PIE, glibc headers) that are wrong for a kernel. See
+# docs/ci.md section 4, "Why aarch64-none-elf".
+CROSS_COMPILE ?= $(ARCH)-none-elf-
 
 # debug   : -O0, everything observable, what you develop and gdb against
 # release : -O2, what a real build looks like
@@ -193,6 +195,7 @@ HARDENING_OFF := \
 
 TARGET_FLAGS := \
   -mgeneral-regs-only \
+  -mno-outline-atomics \
   -fno-pie
 
 # -mgeneral-regs-only : THE one to understand. AArch64 has SIMD/FP registers
@@ -209,8 +212,17 @@ TARGET_FLAGS := \
 #                       enable it, note that context switching must then save
 #                       and restore those registers too.
 #
-# -fno-pie            : Ubuntu's cross-GCC is built with --enable-default-pie,
-#                       so it generates position-independent code by default.
+# -mno-outline-atomics : GCC (Ubuntu's AND Arm's none-elf build) defaults to
+#                       turning every atomic into a call to a libgcc helper,
+#                       e.g. `bl __aarch64_ldadd4_relax`, which picks LSE or
+#                       LL/SC at run time from a flag an OS sets at startup.
+#                       Nothing sets it in our kernel. With this flag the
+#                       atomic is emitted inline (ldxr/stxr on ARMv8.0), so
+#                       what a spinlock does is visible in our own disassembly.
+#
+# -fno-pie            : many GCC builds (Ubuntu's among them) default to
+#                       position-independent code. Arm's none-elf build does
+#                       not, but we say so explicitly rather than rely on it.
 #                       PIC/PIE assumes a dynamic loader will apply relocations
 #                       at load time; nothing does that for us. We link at a
 #                       fixed physical address, so we want plain absolute code.
@@ -250,16 +262,34 @@ DEBUGINFO := -g
 
 INCLUDES := $(addprefix -I,$(INC_DIRS))
 
+# System headers: the compiler's own, and nothing else.
+#
+# -nostdinc drops every default include directory. We then add back, as
+# -isystem, exactly the ones the compiler itself reports EXCEPT the C library's
+# (newlib, <triple>/include). What is left is GCC's freestanding C headers
+# (<stdint.h>, <stddef.h>, <stdarg.h>, <limits.h>) and libstdc++'s headers
+# (<cstdint>, <type_traits>, ...). A libc header such as <stdio.h> becomes a
+# compile error at the #include, instead of a declaration that fails at link
+# time or, worse, links against something we did not write.
+#
+# The list is the compiler's own answer (-v), so nothing here hardcodes a GCC
+# version or an install path.
+SYS_INC_DIRS := $(filter-out %-none-elf/include,$(abspath $(shell \
+  echo | $(CXX) -std=c++20 -ffreestanding -E -x c++ - -v 2>&1 | \
+  sed -n '/^\#include <\.\.\.> search starts here:/,/^End of search list\./p' | \
+  sed -e '1d' -e '$$d')))
+SYSINCLUDES := -nostdinc $(addprefix -isystem ,$(SYS_INC_DIRS))
+
 CXXFLAGS := $(OPTFLAGS) $(DEBUGINFO) $(WARNINGS) $(FREESTANDING) $(CXX_LANG) \
             $(HARDENING_OFF) $(TARGET_FLAGS) $(REPRODUCIBILITY) $(DEPFLAGS) \
-            $(INCLUDES) $(DEFINES)
+            $(SYSINCLUDES) $(INCLUDES) $(DEFINES)
 
 # Assembler flags are a deliberate subset: passing C++-only options such as
 # -std=c++20 or -fno-rtti to an assembly translation unit makes GCC complain
 # that the option is not valid for this language, and -Werror turns that
 # complaint into a failed build.
 ASFLAGS := $(DEBUGINFO) $(WARNINGS) $(FREESTANDING) $(TARGET_FLAGS) \
-           $(REPRODUCIBILITY) $(DEPFLAGS) $(INCLUDES) $(DEFINES)
+           $(REPRODUCIBILITY) $(DEPFLAGS) -nostdinc $(INCLUDES) $(DEFINES)
 
 # -----------------------------------------------------------------------------
 #  6. Linker flags
@@ -357,8 +387,8 @@ check-toolchain:
 	  echo ""; \
 	  echo "error: cross compiler '$(CXX)' not found on PATH."; \
 	  echo ""; \
-	  echo "  Install it (Ubuntu/WSL):"; \
-	  echo "    sudo apt-get install -y g++-aarch64-linux-gnu"; \
+	  echo "  Install the Arm GNU Toolchain (aarch64-none-elf) -- on WSL,"; \
+	  echo "  scripts/bootstrap-wsl.sh does it. Version: docker/Dockerfile."; \
 	  echo ""; \
 	  echo "  Or build inside the pinned container instead -- see README.md."; \
 	  echo ""; \
@@ -547,7 +577,7 @@ COMPDB_PORTABLE := $(if $(HOST_CURDIR),$(if $(filter $(HOST_CURDIR),$(CURDIR)),1
 # The compiler (first word) is resolved to an absolute path. The IDE EXECUTES
 # it to learn its builtin macros and system header search path, and it does
 # not necessarily do so with the same PATH the build had; a bare
-# aarch64-linux-gnu-g++ is a "Cannot find compiler executable" waiting to
+# aarch64-none-elf-g++ is a "Cannot find compiler executable" waiting to
 # happen. See docs/clion.md section 1.
 ifeq ($(COMPDB)$(COMPDB_PORTABLE),11)
 define compdb-fragment

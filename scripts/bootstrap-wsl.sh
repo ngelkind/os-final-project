@@ -16,12 +16,15 @@
 #
 #    1. Refuses to run outside WSL, or as root.
 #    2. apt-get installs everything the project needs: git, gh (the GitHub
-#       CLI), Docker, QEMU, the cross debugger, the aarch64 cross compiler.
+#       CLI), Docker, QEMU, the cross debugger.
 #    3. Adds you to the 'docker' group and enables systemd in /etc/wsl.conf,
 #       so the Docker daemon starts by itself in every future WSL session.
 #    4. Starts the Docker daemon right now, so THIS run can continue.
 #    5. Logs you in to GitHub in your browser (gh auth login) if needed.
-#    6. Clones the repository into ~/projects if it is not already there.
+#    6. Clones the repository into ~/projects if it is not already there,
+#       then installs the kernel compiler (Arm GNU Toolchain, aarch64-none-elf)
+#       with scripts/install-arm-toolchain.sh -- the same release the
+#       container uses, so native WSL builds match CI.
 #    7. Runs scripts/setup.sh -- the verifier -- which builds the kernel in
 #       the reference container and boots it under QEMU.
 #
@@ -156,15 +159,12 @@ fi
 
 command -v sudo >/dev/null 2>&1 || die "sudo is not installed, and this script needs it to install packages."
 
-# Windows laptops are almost always x86-64, but Windows-on-ARM exists. The
-# cross compiler package differs: on x86-64 Ubuntu ships an explicit cross
-# package; on an aarch64 host the native compiler already targets aarch64 and
-# installs the triplet-prefixed names the Makefile expects. Mirrors the same
-# decision in docker/Dockerfile.
+# Windows laptops are almost always x86-64, but Windows-on-ARM exists. Both
+# have an Arm GNU Toolchain build; scripts/install-arm-toolchain.sh (step 6)
+# picks the right one.
 HOST_ARCH="$(uname -m)"
 case "${HOST_ARCH}" in
-    x86_64)  CROSS_PKGS=(g++-aarch64-linux-gnu) ;;
-    aarch64) CROSS_PKGS=(g++ binutils) ;;
+    x86_64|aarch64) ;;
     *)       die "Unsupported CPU architecture: ${HOST_ARCH}" ;;
 esac
 ok "host architecture: ${HOST_ARCH}"
@@ -197,7 +197,8 @@ step "Installing packages"
 # gdb-multiarch   : a gdb that understands aarch64 on an x86-64 host
 # gh              : the GitHub CLI, used below to log in and clone
 # make            : the build driver; not part of a minimal WSL image
-PKGS=(git curl make gh qemu-system-arm gdb-multiarch "${CROSS_PKGS[@]}")
+# xz-utils        : unpacks the Arm GNU Toolchain tarball in step 6
+PKGS=(git curl make gh qemu-system-arm gdb-multiarch xz-utils)
 [[ "${HAVE_DOCKER}" -eq 0 ]] && PKGS+=(docker.io)
 
 MISSING=()
@@ -217,10 +218,10 @@ else
     ok "installed: ${MISSING[*]}"
 fi
 
-for tool in git gh make qemu-system-aarch64 gdb-multiarch aarch64-linux-gnu-g++; do
+for tool in git gh make qemu-system-aarch64 gdb-multiarch; do
     command -v "${tool}" >/dev/null 2>&1 || die "'${tool}' is still not on PATH after installing. This should not happen; report it."
 done
-ok "tools on PATH: git gh make qemu-system-aarch64 gdb-multiarch aarch64-linux-gnu-g++"
+ok "tools on PATH: git gh make qemu-system-aarch64 gdb-multiarch"
 
 # =============================================================================
 #  4. Docker Engine inside WSL: group, systemd, and start it now
@@ -388,6 +389,16 @@ case "${DEST}" in
         info "Builds are several times slower there and the executable bit"
         info "does not persist. Clone into ~/projects instead. Continuing anyway." ;;
 esac
+
+# The kernel compiler is not an apt package: it is Arm's official release,
+# pinned by version and SHA-256 in docker/Dockerfile. The install script reads
+# both from there, which is why it runs only now that the repository exists.
+step "Installing the kernel compiler (Arm GNU Toolchain, aarch64-none-elf)"
+bash "${DEST}/scripts/install-arm-toolchain.sh" \
+    || die "installing the Arm GNU Toolchain failed; the message above says why."
+command -v aarch64-none-elf-g++ >/dev/null 2>&1 \
+    || die "aarch64-none-elf-g++ is still not on PATH after installing. Is /usr/local/bin on your PATH?"
+ok "kernel compiler: $(aarch64-none-elf-g++ --version | head -n 1)"
 
 # =============================================================================
 #  7. Verify, using the same script every other platform uses

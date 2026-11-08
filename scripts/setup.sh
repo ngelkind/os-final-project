@@ -503,7 +503,7 @@ if [[ -z "${KERNEL_SOURCES}" || "${HAVE_LINKER_SCRIPT}" -eq 0 ]]; then
     fi
 
     echo "Verify the toolchain itself right now if you like:"
-    echo "    docker run --rm ${IMAGE} aarch64-linux-gnu-g++ --version"
+    echo "    docker run --rm ${IMAGE} aarch64-none-elf-g++ --version"
     echo "    docker run --rm ${IMAGE} qemu-system-aarch64 --version"
     echo
     exit 0

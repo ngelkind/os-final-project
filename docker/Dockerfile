@@ -26,8 +26,8 @@
 # See docs/ci.md section 4, "How pinned is pinned".
 FROM ubuntu:24.04
 
-# buildx sets this automatically per target platform. We need it because the
-# cross-toolchain package name is not the same on both architectures.
+# buildx sets this automatically per target platform. We need it because Arm
+# publishes a separate toolchain tarball for each host architecture.
 ARG TARGETARCH
 
 LABEL org.opencontainers.image.title="os-final-project CI toolchain"
@@ -82,36 +82,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-#  The AArch64 cross toolchain
-# -----------------------------------------------------------------------------
-# This differs by host architecture, and the difference is easy to get wrong.
-#
-# On amd64: aarch64 is a foreign architecture, so we install the explicit cross
-#   packages, which provide aarch64-linux-gnu-g++ and friends.
-#
-# On arm64: aarch64 IS the native architecture. Ubuntu does not ship a
-#   "cross" compiler targeting the host's own triple -- the native gcc already
-#   targets aarch64-linux-gnu, and Debian's packaging installs the
-#   triplet-prefixed names (aarch64-linux-gnu-g++, -objcopy, ...) alongside the
-#   unprefixed ones. So the native g++/binutils give us exactly the tool names
-#   the Makefile expects.
-#
-# Getting this wrong produces an image that builds fine on one architecture and
-# fails with "aarch64-linux-gnu-g++: not found" on the other -- which is why
-# the verification step below is not optional.
-RUN set -eux; \
-    apt-get update; \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        apt-get install -y --no-install-recommends binutils; \
-    else \
-        apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*
-
-# -----------------------------------------------------------------------------
 #  The bare-metal kernel compiler: Arm GNU Toolchain, aarch64-none-elf
 # -----------------------------------------------------------------------------
 # The kernel is built with aarch64-none-elf, not with Ubuntu's
@@ -162,11 +132,6 @@ RUN set -eux; \
 # costs a confusing red CI run on somebody's unrelated pull request.
 RUN set -eux; \
     for tool in \
-        aarch64-linux-gnu-g++ \
-        aarch64-linux-gnu-gcc \
-        aarch64-linux-gnu-objcopy \
-        aarch64-linux-gnu-objdump \
-        aarch64-linux-gnu-size \
         aarch64-none-elf-g++ \
         aarch64-none-elf-gcc \
         aarch64-none-elf-objcopy \

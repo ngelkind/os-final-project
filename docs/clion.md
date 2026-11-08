@@ -127,7 +127,7 @@ database with a useless one. It also makes
 `-ffile-prefix-map=$(CURDIR)=.` strip the same prefix a host build would, which keeps the debug
 info consistent between the two.
 
-**The compiler — depends on your toolchain.** Entries name `/usr/bin/aarch64-linux-gnu-g++`. The
+**The compiler — depends on your toolchain.** Entries name `/usr/local/bin/aarch64-none-elf-g++`. The
 IDE does not merely read the flags, it *executes* the compiler to learn its builtin macros and its
 system header search path (§2). *Where* it looks for that binary depends on which toolchain the IDE
 is set to, so the script has two modes:
@@ -144,7 +144,7 @@ Cannot find compiler executable: '/opt/homebrew/bin/aarch64-elf-g++'
 ```
 
 That is `INDEXER=host` output being read by a Docker toolchain — CLion is looking for a Homebrew
-path *inside the container*. The reverse mismatch fails the same way with `/usr/bin/aarch64-linux-gnu-g++`.
+path *inside the container*. The reverse mismatch fails the same way with `/usr/local/bin/aarch64-none-elf-g++`.
 
 In `host` mode the database is no longer a byte-exact transcript of the build, so the untouched
 output is kept beside it as `compile_commands.raw.json`. In `container` mode there is
@@ -162,7 +162,8 @@ and everything downstream, are as complete as they can be.
 
 > **Confirmed 2026-08-29.** This section's recommendation held up and is now what is configured
 > here: CLion's default toolchain is `Docker`, image `ghcr.io/ngelkind/os-final-project-ci:latest`,
-> `--platform linux/arm64`, C++ compiler pinned to `/usr/bin/aarch64-linux-gnu-g++`. It is why
+> `--platform linux/arm64`, C++ compiler pinned to `/usr/local/bin/aarch64-none-elf-g++` (it was
+> `/usr/bin/aarch64-linux-gnu-g++` until the 2026-11-08 switch, see `docs/ci.md` §4). It is why
 > `scripts/compdb.sh` defaults to `INDEXER=container` and leaves the database untouched.
 >
 > One correction to Plan B below: a native `aarch64-elf-g++` *can* serve as the indexer's driver
@@ -184,7 +185,7 @@ end-to-end, `uint64_t` is unknown, and no amount of editing fixes it, because th
 CLion is asking the wrong compiler.
 
 A Docker toolchain points CLion at the container, so the indexer runs the same
-`aarch64-linux-gnu-g++` as the build and CI.
+`aarch64-none-elf-g++` as the build and CI.
 
 ### Configuring it
 
@@ -195,8 +196,8 @@ A Docker toolchain points CLion at the container, so the indexer runs the same
   `ghcr.io/ngelkind/os-final-project-ci:latest`.
 - **Container settings**: add `--platform linux/arm64` on Apple Silicon so you get the native
   variant rather than the emulated one.
-- **C Compiler / C++ Compiler**: set explicitly to `/usr/bin/aarch64-linux-gnu-gcc` and
-  `/usr/bin/aarch64-linux-gnu-g++`. Do not let CLion auto-detect — it will find the container's
+- **C Compiler / C++ Compiler**: set explicitly to `/usr/local/bin/aarch64-none-elf-gcc` and
+  `/usr/local/bin/aarch64-none-elf-g++`. Do not let CLion auto-detect — it will find the container's
   *host* `g++` (which is x86-64 or arm64 Linux, not our freestanding target) and you get the same
   wrong-compiler problem one level down.
 - **Debugger**: `/usr/bin/gdb-multiarch`. See the debugging caveat in §5.
@@ -215,15 +216,19 @@ thousands — this should be fine. If it turns out sluggish, fall back to:
 brew install --cask gcc-aarch64-embedded
 ```
 
-**This does not work for this project, and the reason is worth writing down.** Homebrew's
-`aarch64-elf-gcc` (16.2.0, already installed here) is built `--without-headers`: it ships GCC's own
+That cask is Arm's own build of the **same Arm GNU Toolchain release the container uses**, with
+newlib and libstdc++ headers, so unlike the formula below it should be able to serve as a native
+compiler and indexer driver. Not yet tried on this Mac; the container stays the default.
+
+**The Homebrew formula does not work for this project, and the reason is worth writing down.**
+Homebrew's `aarch64-elf-gcc` formula (16.2.0, already installed here) is built `--without-headers`: it ships GCC's own
 freestanding C headers and nothing else. `#include <stdint.h>` compiles; `#include <cstdint>` fails
 with *"cstdint: No such file or directory"*, and so do `<cstddef>` and `<type_traits>`. We build
 C++20, and section 3 tells you that unresolved freestanding C++ headers mean the wrong compiler --
 so a native cross compiler as the indexer's compiler would produce exactly the symptom it is meant
 to cure.
 
-The container's `aarch64-linux-gnu-g++` carries a full libstdc++, so it has those headers. That
+The container's `aarch64-none-elf-g++` carries libstdc++ (built on newlib), so it has those headers. That
 makes the Docker toolchain **required** here rather than merely recommended. The native cross
 compiler is still useful -- but for `aarch64-elf-gdb`, not for indexing.
 

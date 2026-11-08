@@ -110,7 +110,7 @@ Output layout, where `<cfg>` is `debug`, `release`, `debug-ktests` or `release-k
 build/<cfg>/kernel.elf        the linked kernel
 build/<cfg>/kernel.img        flat binary (objcopy -O binary)
 build/<cfg>/kernel.map        linker map
-build/<cfg>/size.txt          aarch64-linux-gnu-size output   (CI artifact)
+build/<cfg>/size.txt          aarch64-none-elf-size output    (CI artifact)
 build/<cfg>/sections.txt      objdump -h output                (CI artifact)
 build/<cfg>/obj/<path>.<ext>.o
 build/<cfg>/obj/<path>.<ext>.d
@@ -356,25 +356,51 @@ flags, rather than what the documentation says should happen.
 To be filled in at M2 from the container build, recording the exact output of:
 
 ```
-aarch64-linux-gnu-g++ --version
+aarch64-none-elf-g++ --version
 qemu-system-aarch64 --version
 ```
 
-### Why `aarch64-linux-gnu` and not `aarch64-none-elf`
+### Why `aarch64-none-elf` and not `aarch64-linux-gnu`
 
-`aarch64-none-elf` is the "pure" bare-metal target: no operating system in the triple, no
-assumptions about a C library. It is also not packaged by Ubuntu, so using it means either
-building GCC from source (an afternoon, plus several minutes added to every container build) or
-depending on a third-party binary release.
+Decided 2026-11-08 (GitLab issue #2). Until then the build used Ubuntu's `aarch64-linux-gnu`
+cross compiler with every Linux default switched off by hand. Both compilers emit the same AArch64
+instructions; what the triple changes is what the compiler *assumes* about the world around the
+code. For a kernel, and for a project whose priority is understanding security and exploitation,
+assumptions we did not choose are the problem.
 
-The Linux-targeted cross compiler works perfectly well for a freestanding kernel provided we pass
-`-ffreestanding -nostdlib -nostartfiles`, which we do. What the triple actually changes is the
-*default* assumptions, and we override every one of them explicitly in the Makefile — where they
-are visible and commented, rather than baked invisibly into the toolchain.
+What Ubuntu's `aarch64-linux-gnu-g++` 13.3 did silently, measured in the old image:
 
-This is a pragmatic trade, chosen with open eyes: distro packaging and CI speed in exchange for a
-compiler whose defaults we must be explicit about. The Makefile's flag comments are where that
-explicitness lives.
+| Linux default | Effect on our kernel |
+|---|---|
+| `-moutline-atomics` | Every atomic became a call into libgcc (`bl __aarch64_ldadd4_relax`) that picks LSE or LL/SC from a flag an OS sets at startup. Nothing sets it in our kernel, so spinlocks would run helper code we never wrote, on a fallback path we never chose. **Arm's none-elf build defaults to this too**, so the Makefile passes `-mno-outline-atomics` explicitly; atomics are then inline `ldxr`/`stxr`. |
+| `__linux__` defined | Any header or snippet with `#ifdef __linux__` takes the Linux path. |
+| glibc and Linux headers on the include path | `#include <thread_db.h>` or `<stdio.h>` compiled without a word, even with `-ffreestanding`. The failure only showed up later, at link time or at run time. |
+| `-fPIE`, `-fstack-protector-strong` by default | Overridden in the Makefile, but only because someone knew to. |
+
+`aarch64-none-elf` (bare metal, no OS in the triple) has no `__linux__`, no glibc, no default PIE
+and no default stack protector. Outline atomics are the one default it shares, and the Makefile
+turns them off. Its only library is newlib, and `-nostdinc` (§ below) keeps even that off
+the include path. Every runtime helper and every mitigation in the kernel is then one we wrote or
+switched on deliberately — stack canaries, PAC/BTI and W^X are planned as their own backlog
+issues, and each is easier to explain at the defense when the toolchain adds nothing behind our
+back.
+
+**Where it comes from.** Ubuntu does not package `aarch64-none-elf`, so the image installs Arm's
+official binary release, the *Arm GNU Toolchain*, from
+<https://gitlab.arm.com/tooling/gnu-toolchains-for-arm>. `docker/Dockerfile` pins the version
+(`ARM_GNU_VERSION`) and the SHA-256 of both the amd64 and arm64 host builds; a different tarball
+fails the image build. `scripts/install-arm-toolchain.sh` reads the same three values to install
+the identical release natively on Linux/WSL, and on macOS
+`brew install --cask gcc-aarch64-embedded` ships the same release.
+
+**`-nostdinc`.** The Makefile drops every default include directory and adds back only the
+compiler's own freestanding headers (`<stdint.h>`, `<stddef.h>`, `<stdarg.h>`, ...) plus the
+libstdc++ headers our code uses (`<cstdint>`). A libc header such as `<stdio.h>` is then a
+compile error with a clear message, instead of a newlib declaration that only fails at link time.
+
+**Upgrading** is a three-line change in `docker/Dockerfile`: new version, two new sums (published
+next to each tarball as `.sha256asc`). The toolchain-image workflow rebuilds and republishes the
+image; re-run `scripts/install-arm-toolchain.sh` on any native install.
 
 ### How "pinned" is pinned
 

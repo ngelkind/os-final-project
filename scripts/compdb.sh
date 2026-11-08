@@ -29,7 +29,7 @@
 #      (The Makefile refuses to write the database at all under a /work-style
 #      mount rather than silently replacing a good one with a useless one.)
 #
-#   2. The compiler. Entries name /usr/bin/aarch64-linux-gnu-g++. The IDE does
+#   2. The compiler. Entries name /usr/local/bin/aarch64-none-elf-g++. The IDE does
 #      not merely read the flags, it EXECUTES the compiler to learn its builtin
 #      macros and its system header search path. WHERE it looks for that binary
 #      depends on which toolchain the IDE is set to, and that is what INDEXER
@@ -203,10 +203,10 @@ fi
 #
 # It only has to be a real AArch64 driver: the IDE runs it for its target
 # defaults, and takes every system header from the extracted tree above. On
-# macOS this is Homebrew's aarch64-elf-g++.
+# macOS this is the Arm GNU Toolchain cask or Homebrew's aarch64-elf-g++.
 INDEX_CXX="${INDEX_CXX:-}"
 if [[ -z "${INDEX_CXX}" ]]; then
-    for c in aarch64-elf-g++ aarch64-none-elf-g++ aarch64-linux-gnu-g++; do
+    for c in aarch64-none-elf-g++ aarch64-elf-g++; do
         if command -v "$c" >/dev/null 2>&1; then INDEX_CXX="$(command -v "$c")"; break; fi
     done
 fi
@@ -219,8 +219,8 @@ warning: no host AArch64 compiler found, so compile_commands.json still names
          container. The IDE will list your sources but will not resolve system
          headers such as <cstdint>.
 
-         macOS:  brew install aarch64-elf-gcc
-         Linux:  sudo apt-get install -y g++-aarch64-linux-gnu
+         macOS:  brew install --cask gcc-aarch64-embedded
+         Linux:  bash scripts/install-arm-toolchain.sh
 
          Then re-run this script, or set INDEX_CXX to a driver of your choice.
 

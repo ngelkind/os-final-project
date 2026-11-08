@@ -4,7 +4,7 @@ REM
 REM On macOS that configuration builds inside the pinned Docker container,
 REM because the Mac has no worthwhile native AArch64 toolchain (docs/clion.md
 REM section 2). On WSL there is no such gap: bootstrap-wsl.sh already installs
-REM a native aarch64-linux-gnu-g++, so this builds natively for speed and
+REM the native aarch64-none-elf-g++ (Arm GNU Toolchain), so this builds natively and
 REM boots the result under QEMU. See docs/clion-windows.md.
 REM
 REM If your WSL distro is not named exactly "Ubuntu-24.04" (check with

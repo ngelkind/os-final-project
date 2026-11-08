@@ -13,7 +13,7 @@ was.
 
 **Prerequisite.** `scripts/bootstrap-wsl.sh` must have already finished successfully — see
 `docs/onboarding.md`. It installs the exact three things this setup needs inside WSL: the cross
-compiler (`aarch64-linux-gnu-g++`), `qemu-system-aarch64`, and `gdb-multiarch`.
+compiler (`aarch64-none-elf-g++`, the Arm GNU Toolchain), `qemu-system-aarch64`, and `gdb-multiarch`.
 
 ---
 
@@ -24,14 +24,16 @@ Linux toolchain worth using — see `docs/clion.md` §2), and only the run/debug
 talking to QEMU installed via Homebrew.
 
 On Windows, WSL2 already *is* a real Linux environment, and `bootstrap-wsl.sh` already installed a
-native `aarch64-linux-gnu-g++` inside it — the same package the container uses
-(`docker/Dockerfile`). So there is no reason to route CLion's build through Docker a second time:
+native `aarch64-none-elf-g++` inside it — the same Arm GNU Toolchain release the container uses,
+installed by `scripts/install-arm-toolchain.sh` with the version and SHA-256 pinned in
+`docker/Dockerfile`. So there is no reason to route CLion's build through Docker a second time:
 **CLion's WSL toolchain gives you the same compiler as the container, without the container.**
 That is a real, supported CLion feature (JetBrains calls it a "WSL toolchain"), not a workaround.
 
 The trade-off, same one `docs/onboarding.md` already states for native builds on any platform:
-**the container remains the source of truth.** The native `aarch64-linux-gnu-g++` inside WSL and
-the one baked into the pinned image can drift by a point release. If a build behaves differently
+**the container remains the source of truth.** The native `aarch64-none-elf-g++` inside WSL comes
+from the same pinned tarball as the one in the image, so they should not drift — but if the
+install script was not re-run after an upgrade, they can. If a build behaves differently
 than CI, reproduce it in the container (`docker run ... make`, see `docs/ci.md`) before concluding
 it is a code bug — exactly the rule already in `docs/onboarding.md`, "The reference environment."
 
@@ -80,10 +82,10 @@ wrong.
   `bootstrap-wsl.sh` already installs `make`; confirm with `which make` if the Build Tool field
   still does not resolve after installing `cmake`. Reopen the toolchain dialog (or hit **Apply**)
   once both are installed.
-- **C Compiler**: set explicitly to `/usr/bin/aarch64-linux-gnu-gcc`.
-- **C++ Compiler**: set explicitly to `/usr/bin/aarch64-linux-gnu-g++`.
+- **C Compiler**: set explicitly to `/usr/local/bin/aarch64-none-elf-gcc`.
+- **C++ Compiler**: set explicitly to `/usr/local/bin/aarch64-none-elf-g++`.
   Do not let CLion auto-detect either of these. Left alone, CLion filled *both* the C and C++
-  fields with `aarch64-linux-gnu-gcc` — the C driver in both slots, never offering `g++` at all.
+  fields with the C driver (`gcc`) in both slots, never offering `g++` at all.
   That is the same wrong-compiler trap `docs/clion.md` §2 warns about for the Docker toolchain, one
   level removed, and CLion does not catch it for you; it must be typed in by hand.
 - **Debugger**: `/usr/bin/gdb-multiarch`, typed as a plain WSL path. CLion's auto-fill produced
@@ -108,13 +110,13 @@ build ran **inside a container** and the IDE runs **outside it**.
 
 That mismatch does not apply here. A WSL-toolchain build runs `make` natively inside the same WSL
 filesystem CLion is reading the project from, so the paths in the database are already correct,
-and the compiler path it records — `/usr/bin/aarch64-linux-gnu-g++` — is exactly the binary the WSL
+and the compiler path it records — `/usr/local/bin/aarch64-none-elf-g++` — is exactly the binary the WSL
 toolchain is configured to call. Build once (`make`, or the IDE's own build action), then
 **File → Reload Project** if CLion does not pick up the fresh database automatically.
 
 If files still show as unindexed or `uint64_t` as unknown after that, the fix is the same as
 `docs/clion.md` §3: confirm Settings → Toolchains actually points the *C++ Compiler* field at
-`aarch64-linux-gnu-g++`, not the native `g++` CLion may have auto-filled.
+`aarch64-none-elf-g++`, not the native `g++` CLion may have auto-filled.
 
 ---
 
