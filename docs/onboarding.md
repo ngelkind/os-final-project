@@ -419,6 +419,10 @@ make format             # apply clang-format
 make help               # every target
 ```
 
+**Run `make format` before every commit.** CI's `format` job runs `make format-check` and fails
+the whole pipeline on any file that clang-format would change, even if the build and the QEMU
+test pass. Formatting in a separate commit keeps the real change easy to review.
+
 To work inside the container exactly the way CI does:
 
 ```sh
