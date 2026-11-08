@@ -4,7 +4,6 @@
 
 #include "console.h"
 #include <cstdint>
-#include <thread_db.h>
 const auto UART_BASE = reinterpret_cast<volatile uint8_t*>(0x09000000);
 const auto UART_FLAGS = reinterpret_cast<volatile uint32_t*>(0x9000018);
 // const auto UART_FLAGS = reinterpret
