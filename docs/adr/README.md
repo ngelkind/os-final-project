@@ -13,3 +13,4 @@ than the reasoning that was right.
 | [0001](0001-container-not-pet-vm.md) | A pinned container, not a persistent VM | Accepted |
 | [0002](0002-make-not-cmake.md) | GNU Make, not CMake | Accepted |
 | [0003](0003-log-parsing-owns-the-verdict.md) | The serial log decides pass/fail, not an exit code | Accepted |
+| [0004](0004-bare-metal-toolchain.md) | aarch64-none-elf, not aarch64-linux-gnu | Accepted |
