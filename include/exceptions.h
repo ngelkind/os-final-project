@@ -1,2 +1,3 @@
 #pragma once
-extern "C" void handle_sync_exception_cpp();
+#include <cstdint>
+extern "C" void handle_exception_cpp(uint64_t entry);
