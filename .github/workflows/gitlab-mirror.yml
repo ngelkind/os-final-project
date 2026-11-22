@@ -1,0 +1,96 @@
+# =============================================================================
+#  Mirror GitHub -> GitLab.
+# =============================================================================
+#
+#  GitHub (ngelkind/os-final-project) is the source of truth. The GitLab project
+#  nachumgetzel.elkind/BeitShemesh-604-os-final-project is an exact copy of it,
+#  updated on every push, so mentors reading GitLab see the same code.
+#
+#  Every run is a FULL sync, not just the ref that was pushed: all branches and
+#  tags are force-pushed, and anything that no longer exists on GitHub is
+#  deleted on GitLab (--prune). So a run triggered by any push also repairs
+#  whatever an earlier run missed.
+#
+#  Triggers:
+#  * push / delete  - the normal path, seconds after every push or branch delete.
+#  * schedule       - safety net. A push only runs this workflow if the pushed
+#                     commit contains this file, so a branch created before the
+#                     file existed is picked up here within 30 minutes.
+#  * workflow_dispatch - manual "sync now" from the Actions tab.
+#
+#  Auth: a GitLab deploy key with write access to that one project only, stored
+#  here as the secret GITLAB_MIRROR_SSH_KEY. On GitLab, `main` is protected so
+#  that only this key can push to it; push to GitHub, never to GitLab directly.
+# =============================================================================
+name: gitlab-mirror
+
+on:
+  push:
+  delete:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+# Each run syncs everything, so a newer run makes an older queued one redundant.
+concurrency:
+  group: gitlab-mirror
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GITLAB_REMOTE: git@gitlab.com:nachumgetzel.elkind/BeitShemesh-604-os-final-project.git
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up SSH for gitlab.com
+        env:
+          KEY: ${{ secrets.GITLAB_MIRROR_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # gitlab.com host keys, pinned. Fingerprints checked against
+          # https://docs.gitlab.com/user/gitlab_com/#ssh-host-keys-fingerprints
+          #   ED25519 SHA256:eUXGGm1YGsMAS7vkcx6JOJdOGHPem5gQp4taiCfCLB8
+          #   RSA     SHA256:ROQFvPThGrW4RuWLoL9tq9I9zJ42fK4XywyRtbOz/EQ
+          #   ECDSA   SHA256:HbW3g8zUjNSksFbqTiUWPWg2Bq1x8xdGUrliXFzSnUw
+          cat > ~/.ssh/known_hosts <<'EOF'
+          gitlab.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFSMqzJeV9rUzU4kWitGjeR4PWSa29SPqJ1fVkhtj3Hw9xjLVXVYrU9QlYWrOLXBpQ6KWjbjTDTdDkoohFzgbEY=
+          gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf
+          gitlab.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsj2bNKTBSpIYDEGk9KxsGh3mySTRgMtXL583qmBpzeQ+jqCMRgBqB98u3z++J1sKlXHWfM9dyhSevkMwSbhoR8XIq/U0tCNyokEi/ueaBMCvbcTHhO7FcwzY92WK4Yt0aGROY5qX2UKSeOvuP4D6TPqKF1onrSzH9bx9XUf2lEdWT/ia1NEKjunUqu1xOB/StKDHMoX4/OKyIzuS0q/T1zOATthvasJFoPrAjkohTyaDUz2LN5JoH839hViyEG82yB+MjcFV5MU3N1l1QL3cVUCh93xSaua1N85qivl+siMkPGbO5xR/En4iEY6K2XPASUEMaieWVNTRCtJ4S8H+9
+          EOF
+
+      - name: Fetch every branch and tag from GitHub
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git init --bare -q repo.git
+          cd repo.git
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" \
+            fetch --prune "https://github.com/${GITHUB_REPOSITORY}.git" \
+            '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+          git for-each-ref --format='%(objectname:short) %(refname)'
+
+      - name: Push to GitLab
+        working-directory: repo.git
+        run: |
+          git push --force --prune "$GITLAB_REMOTE" \
+            'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+
+      - name: Verify GitLab matches GitHub
+        working-directory: repo.git
+        run: |
+          git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags | sort > github.txt
+          git ls-remote --heads --tags "$GITLAB_REMOTE" | grep -v '\^{}$' \
+            | awk '{print $1" "$2}' | sort > gitlab.txt
+          if diff -u github.txt gitlab.txt; then
+            echo "GitLab is identical to GitHub ($(wc -l < github.txt) refs)."
+          else
+            echo "::error::GitLab differs from GitHub after the push (diff above)."
+            exit 1
+          fi

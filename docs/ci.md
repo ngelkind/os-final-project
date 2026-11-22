@@ -521,3 +521,27 @@ pull request; the authorship one is a single command:
 ```sh
 git log --diff-filter=A --format='%an  %h  %s' -- boot/ src/ include/ linker/ tests/kernel/
 ```
+
+---
+
+## 8. GitLab mirror
+
+The code lives on **GitHub** (`ngelkind/os-final-project`); that is where both of us push and
+where CI runs. The Magshimim GitLab project
+(`nachumgetzel.elkind/BeitShemesh-604-os-final-project`) is where the issues and the mentors are,
+so it carries an exact copy of the code.
+
+`.github/workflows/gitlab-mirror.yml` keeps the copy exact. On every push and every branch
+delete it force-pushes **all** branches and tags to GitLab, deletes what no longer exists on
+GitHub, then compares the two sides ref by ref and goes red if any commit hash differs. A
+30-minute schedule repeats the same sync, as a safety net for branches whose commits do not
+contain the workflow file yet.
+
+Rules that follow from this:
+
+- **Push to GitHub only.** A commit pushed straight to GitLab is overwritten by the next sync.
+  GitLab's `main` is protected so that only the mirror's deploy key can push to it.
+- Commit hashes are identical on both sides, so a hash quoted in a GitLab issue resolves on both.
+- Auth is a GitLab deploy key with write access to that one project, stored in GitHub as the
+  secret `GITLAB_MIRROR_SSH_KEY`. gitlab.com's SSH host keys are pinned in the workflow.
+- To sync by hand: Actions → gitlab-mirror → *Run workflow*.
