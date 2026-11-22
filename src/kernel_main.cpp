@@ -21,6 +21,9 @@ extern "C" void kernel_main() {
         else if (are_string_equals(input, "hello world")) {
             println("hello, cyber"); //TODO: to create a better answer for hello world
         }
+        else if (starts_with(input, "print ")) {
+            println(input + 6); //TODO: to create a better answer for hello world
+        }
         else {
             print("command not found: ");
             println (input);

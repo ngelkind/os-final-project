@@ -11,3 +11,11 @@ bool are_string_equals(const char* f, const char* s) {
     }
     return true;
 }
+bool starts_with(const char* s, const char* prefix) {
+    while (*prefix) {
+        if (*s != *prefix) return false;
+        s++;
+        prefix++;
+    }
+    return true;
+}

@@ -13,5 +13,5 @@ char read_symbol ();
 void print (const char* string);
 void println (const char* string = "");
 void print_hex (uint64_t value);
-char decimal_to_hex (int value);
 int read_input(char* buffer, int max_length);
+void print_unsigned (uint64_t value, unsigned base);

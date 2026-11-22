@@ -1,13 +1,11 @@
 
 #include "console.h"
 #include <cstdint>
-#include <thread_db.h>
-#include <wchar.h>
-#include <stdio.h>
 #include <stdarg.h>
 const auto UART_BASE = reinterpret_cast<volatile uint8_t*>(0x09000000);
 const auto UART_FLAGS = reinterpret_cast<volatile uint32_t*>(0x9000018);
 //const auto UART_FLAGS = reinterpret
+static char decimal_to_hex(int value);
 void print_symbol(const char ch) {
     while (*UART_FLAGS >> 5 & 1) {
     } // we wait until the register is fre
@@ -54,8 +52,10 @@ void print(const char* string) {
         print_symbol(string[i]);
     }
 }
-void vvprintf(const char* format, va_list args) {
-    
+void vvprintf(const char* format, [[maybe_unused]] va_list args) {
+    for (int i = 0; format[i] != '\0'; ++i) {
+        if (format [i] != '%') print_symbol(format[i]);
+    }
 }
 void printf (const char* format, ...) {
     va_list args;
@@ -89,16 +89,20 @@ void print_hex(uint64_t value) {
         print_symbol(values[i - 1]);
     }
 }
-char decimal_to_hex(const int value) {
+static char decimal_to_hex(const int value) {
     return value < 10 ? '0' + value : 'A' + (value - 10);
 }
 // template<typename... Args>
 // void printf (template<typename... Args>
 // )
-print_unsigned (uint64_t value, unsigned base) {
-    char buffer [65];
-    while (value != 0) {
-        
-    }
-
+void print_unsigned (uint64_t value, const unsigned base) {
+    char buffer[65];
+    int i = 64;
+    do {
+        buffer[--i] = decimal_to_hex(static_cast<char>(value % base));
+        value /= base;
+    } while (value);
+    buffer [64] = '\0';
+    print(buffer + i);
 }
+
